@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.siren import SirenEntity, SirenEntityFeature
+from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later
 
 from .entity import EufySdkDeviceEntity, has_capability
@@ -99,6 +100,7 @@ class EufySdkSiren(EufySdkDeviceEntity, SirenEntity):
         await client.action(self._sn, "stop")
         self._hold(on=False)
 
+    @callback
     def _hold(self, *, on: bool) -> None:
         """Hold the just-written value and cancel any pending expiry."""
         if self._expiry_unsub is not None:
@@ -107,8 +109,14 @@ class EufySdkSiren(EufySdkDeviceEntity, SirenEntity):
         self._assumed_on = on
         self.async_write_ha_state()
 
+    @callback
     def _expire(self, _now: Any) -> None:
-        """Drop the hold once the duration has elapsed — the alarm stopped itself."""
+        """
+        Drop the hold once the duration has elapsed — the alarm stopped itself.
+
+        `@callback` is load-bearing: `async_call_later` runs an undecorated function in
+        an executor thread, and `async_write_ha_state` must not be called from one.
+        """
         self._expiry_unsub = None
         self._assumed_on = False
         self.async_write_ha_state()
