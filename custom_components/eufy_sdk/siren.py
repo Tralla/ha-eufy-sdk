@@ -93,6 +93,15 @@ class EufySdkSiren(EufySdkDeviceEntity, SirenEntity):
         )
         if not self._standalone:
             self._attr_supported_features |= SirenEntityFeature.DURATION
+            # Only the standalone family reports whether it is sounding, so for a
+            # HomeBase or an attached camera "off" is an assumption. Start from it
+            # rather than from `None`: an alarm lasts its duration (30s unless asked
+            # otherwise) and a restart takes longer, so "off" is nearly always true,
+            # while "unknown" after every restart reads as a fault. `assumed_state`
+            # declares the guess, and HA then offers separate on/off controls
+            # instead of a toggle that claims to know.
+            self._attr_assumed_state = True
+            self._assumed_on = False
 
     @property
     def is_on(self) -> bool | None:
@@ -100,8 +109,10 @@ class EufySdkSiren(EufySdkDeviceEntity, SirenEntity):
         The sounding state a standalone siren reports, else the optimistic hold.
 
         `siren` is installed only for the standalone family, so for a HomeBase or an
-        attached camera this is the written value until its duration elapses — and
-        `None` before anything has been written, rather than a guessed "off".
+        attached camera this is the written value until its duration elapses, and an
+        assumed "off" before anything has been written (see `assumed_state`). A
+        standalone siren that has not reported yet stays `None`: its real value is
+        on the way, so there is nothing to assume.
 
         Where it IS reported, it is the device's own RING_STATUS: an alarm started from
         the eufy app, a keypad or a station rule shows up here too, not just ours.
