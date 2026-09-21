@@ -1,14 +1,20 @@
 """
 Siren platform — the `siren` capability's dedicated trigger()/stop() actions.
 
-Like `lock`, an alarm is not a writable bool: the SDK exposes it as two momentary
+Like `lock`, an alarm is not a writable bool: the SDK exposes it as momentary
 methods, so this bypasses `switch.py`'s property routing and calls `client.action()`.
 
 Which devices get one: every device whose bridge record lists the `siren` capability —
 a HomeBase reporting hub-alarm params, a camera attached to one that reports the EAS
-slot, or a standalone siren. Only the last kind reports a sounding state (`siren`); for
-the other two the entity holds the written value until the duration runs out, the same
-optimistic pattern `lock.py` uses.
+slot, or a standalone siren. The three do NOT share a command surface, and the split
+runs right through turn_on:
+
+  * HomeBase / attached camera — `trigger(seconds)` plus `stop`. No sounding state is
+    reported, so the entity holds the written value until the duration runs out, the
+    same optimistic pattern `lock.py` uses.
+  * standalone siren — `test` plus `stop`; the SDK installs no `trigger` for it, and
+    `test` takes no duration. Here the device reports `siren` (RING_STATUS), so the
+    state is read rather than assumed — including alarms nobody in HA started.
 """
 
 from __future__ import annotations
@@ -39,6 +45,19 @@ DEFAULT_DURATION_SECS = 30
 OPTIMISTIC_GRACE_SECS = 2
 
 
+def is_standalone_siren(record: dict | None) -> bool:
+    """
+    Whether this `siren` device is the standalone family (`test`/`stop`, no `trigger`).
+
+    The codec is a sufficient discriminator because the capability's own detection
+    already did the work: a sensor-codec device earns `siren` ONLY through the
+    standalone evidence (reported alarm volume plus ring status or alarm timeout),
+    while the other two families are a HomeBase (station codec) and a camera attached
+    to one. So `codec == "sensor"` and "standalone" cannot come apart here.
+    """
+    return (record or {}).get("codec") == "sensor"
+
+
 async def async_setup_entry(
     hass: HomeAssistant,  # noqa: ARG001
     entry: EufySdkConfigEntry,
@@ -54,21 +73,26 @@ async def async_setup_entry(
 
 
 class EufySdkSiren(EufySdkDeviceEntity, SirenEntity):
-    """A eufy alarm output, driven by the SDK's `trigger`/`stop` actions."""
+    """A eufy alarm output, driven by the SDK's `trigger`/`test`/`stop` actions."""
 
     _attr_name = "Siren"
-    _attr_supported_features = (
-        SirenEntityFeature.TURN_ON
-        | SirenEntityFeature.TURN_OFF
-        | SirenEntityFeature.DURATION
-    )
 
     def __init__(self, coordinator: EufySdkDataUpdateCoordinator, sn: str) -> None:
-        """Bind to an alarm-capable device serial."""
+        """Bind to an alarm-capable device serial and pin its command family."""
         super().__init__(coordinator, sn)
         self._attr_unique_id = f"{sn}_siren"
         self._expiry_unsub = None
         self._assumed_on: bool | None = None
+        # The family is a property of the hardware, not of the moment — a device does
+        # not change codec — so it is read once here rather than on every call.
+        self._standalone = is_standalone_siren(coordinator.data.get(sn))
+        # DURATION is advertised only where a duration wire exists. Claiming it on a
+        # standalone siren would let HA accept a `duration` that `test` silently drops.
+        self._attr_supported_features = (
+            SirenEntityFeature.TURN_ON | SirenEntityFeature.TURN_OFF
+        )
+        if not self._standalone:
+            self._attr_supported_features |= SirenEntityFeature.DURATION
 
     @property
     def is_on(self) -> bool | None:
@@ -78,6 +102,9 @@ class EufySdkSiren(EufySdkDeviceEntity, SirenEntity):
         `siren` is installed only for the standalone family, so for a HomeBase or an
         attached camera this is the written value until its duration elapses — and
         `None` before anything has been written, rather than a guessed "off".
+
+        Where it IS reported, it is the device's own RING_STATUS: an alarm started from
+        the eufy app, a keypad or a station rule shows up here too, not just ours.
         """
         reported = self.device.get("state", {}).get("siren")
         if reported is not None:
@@ -85,9 +112,16 @@ class EufySdkSiren(EufySdkDeviceEntity, SirenEntity):
         return self._assumed_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Sound the alarm for `duration` seconds (a bounded default without one)."""
-        duration = int(kwargs.get("duration") or DEFAULT_DURATION_SECS)
+        """Sound the alarm — `trigger(duration)`, or `test` on a standalone siren."""
         client = self.coordinator.config_entry.runtime_data.client
+        if self._standalone:
+            # `test` is the standalone family's only "make noise now" wire, and it
+            # carries no duration: the device stops itself after its own configured
+            # alarm timeout. Nothing is assumed here — RING_STATUS reports the truth,
+            # and a hold guessing at a duration the device owns would only fight it.
+            await client.action(self._sn, "test")
+            return
+        duration = int(kwargs.get("duration") or DEFAULT_DURATION_SECS)
         await client.action(self._sn, "trigger", duration)
         self._hold(on=True)
         self._expiry_unsub = async_call_later(
@@ -95,7 +129,7 @@ class EufySdkSiren(EufySdkDeviceEntity, SirenEntity):
         )
 
     async def async_turn_off(self, **_: Any) -> None:
-        """Silence a sounding alarm before its duration runs out."""
+        """Silence a sounding alarm — `stop` is installed for every siren family."""
         client = self.coordinator.config_entry.runtime_data.client
         await client.action(self._sn, "stop")
         self._hold(on=False)
