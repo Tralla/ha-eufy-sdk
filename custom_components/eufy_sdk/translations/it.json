@@ -50,6 +50,9 @@
     "select": {
       "preset": {
         "name": "Preset"
+      },
+      "snapshot_policy": {
+        "name": "Criterio snapshot"
       }
     },
     "sensor": {
