@@ -37,6 +37,7 @@ jobs:
         run: |
           python3 -m pip install -r requirements_common.txt   # integration runtime deps (so it imports)
           python3 -m pip install -r requirements_dev.txt       # homeassistant + lint (via -r)
+          python3 -m pip install pytest                        # runner only; the tests themselves are unittest-based
 
       - name: Run tests
         run: |
@@ -44,7 +45,7 @@ jobs:
           # imports. Guard on tests existing so this workflow can land before the first test PR without
           # a spurious "no tests collected" failure; it gates for real the moment tests are present.
           if ls tests/test_*.py >/dev/null 2>&1; then
-            python3 -m unittest discover -s tests -p "test_*.py" -t .
+            python3 -m pytest tests/ -q   # `python -m` puts the repo root on sys.path so the integration imports; pytest needs no tests/__init__.py
           else
             echo "No tests found under tests/ yet — nothing to run."
           fi
