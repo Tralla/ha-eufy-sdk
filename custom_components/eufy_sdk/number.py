@@ -8,12 +8,15 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import CONF_SOC_REFRESH, DEFAULT_SOC_REFRESH_SEC, DOMAIN
+from .const import (
+    CONF_SOC_REFRESH,
+    DEFAULT_SOC_REFRESH_SEC,
+)
 from .entity import (
     EufySdkPropertyEntity,
+    EufySolixEntity,
     classify,
     has_capability,
     solix_devices_with,
@@ -21,13 +24,12 @@ from .entity import (
 from .light import LIGHT_OWNED_PROPS
 
 if TYPE_CHECKING:
-    from homeassistant.core import Event, HomeAssistant
+    from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
     from .coordinator import EufySdkDataUpdateCoordinator
     from .data import EufySdkConfigEntry
 
-EVENT_TYPE = f"{DOMAIN}_event"
 
 # The manifest carries no min/max, so pick a sane range from the value's `kind`.
 _RANGE_BY_KIND = {"percent": (0, 100), "seconds": (0, 86400), "degrees": (0, 360)}
@@ -139,7 +141,7 @@ SOC_CHARGE = _SocLimit(
 )
 
 
-class EufySolixSocLimitNumber(NumberEntity):
+class EufySolixSocLimitNumber(EufySolixEntity, NumberEntity):
     """
     A Solarbank battery discharge/charge limit as a slider — reflects the DEVICE state.
 
@@ -153,7 +155,6 @@ class EufySolixSocLimitNumber(NumberEntity):
     the next telemetry frame confirms. Device `solix:<sn>`, like the light/sensors.
     """
 
-    _attr_has_entity_name = True
     _attr_native_step = 1
     _attr_mode = NumberMode.SLIDER
     _attr_native_unit_of_measurement = PERCENTAGE
@@ -166,53 +167,40 @@ class EufySolixSocLimitNumber(NumberEntity):
         limit: _SocLimit,
     ) -> None:
         """Bind to a Solix Solarbank limit; seed from its telemetry snapshot."""
-        self._coordinator = coordinator
-        self._sn = sn
+        super().__init__(coordinator, sn, f"{limit.write_kw}_limit")
         self._limit = limit
-        dev = coordinator.solix_devices.get(sn, {})
-        self._value = self._read_snapshot(dev)
+        self._value = self._percent(self.solix_record.get("values") or {})
         self._attr_name = limit.name
         self._attr_icon = limit.icon
         self._attr_native_min_value = limit.low
         self._attr_native_max_value = limit.high
-        self._attr_unique_id = f"solix_{sn}_{limit.write_kw}_limit"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"solix:{sn}")},
-            name=dev.get("name") or sn,
-            manufacturer="Anker Solix",
-            model=dev.get("productCode"),
-            sw_version=dev.get("firmware"),
-            serial_number=sn,
-        )
 
-    def _read_snapshot(self, dev: dict[str, Any]) -> float | None:
-        """Read this limit's percent from a device's values; None if absent."""
-        v = (dev.get("values") or {}).get(self._limit.key)
+    def _percent(self, values: dict[str, Any]) -> float | None:
+        """Return this limit's percent from `values` (None if absent or not numeric)."""
+        v = values.get(self._limit.key)
         return float(v) if isinstance(v, (int, float)) else None
 
     @property
     def native_value(self) -> float | None:
-        """The limit's current value from telemetry (None until a reading arrives)."""
+        """The limit's current value (None until a reading or the HTTP read arrives)."""
         return self._value
 
-    @property
-    def available(self) -> bool:
-        """Available while the bridge still lists this Solix device."""
-        return self._sn in getattr(self._coordinator, "solix_devices", {})
+    def _solix_update(self, values: dict[str, Any], *, snapshot: bool) -> bool:  # noqa: ARG002 - same rule for both sources
+        """Adopt this limit's percent when a reading carries a new one."""
+        v = self._percent(values)
+        if v is None or v == self._value:
+            return False
+        self._value = v
+        return True
 
     async def async_added_to_hass(self) -> None:
-        """Seed from the authoritative HTTP read, then track live readings/snapshot."""
+        """Track live readings/snapshot, then seed from the authoritative HTTP read."""
         await super().async_added_to_hass()
-        self.async_on_remove(self.hass.bus.async_listen(EVENT_TYPE, self._handle_event))
-        self.async_on_remove(
-            self._coordinator.async_add_listener(self._refresh_from_snapshot)
-        )
-        self._refresh_from_snapshot()
         # b5 telemetry only carries the limits on a settings frame (pushed on change,
         # not periodically), so seed from the cloud read + keep an HTTP backstop at the
         # user-configured cadence (CONF_SOC_REFRESH, default 60 s) — the slider shows
         # the real value on load and stays right when the push is quiet. Live b5 events
-        # (_handle_event) still update it immediately.
+        # still update it immediately.
         await self._fetch_limit()
         secs = self._coordinator.config_entry.options.get(
             CONF_SOC_REFRESH, DEFAULT_SOC_REFRESH_SEC
@@ -231,8 +219,7 @@ class EufySolixSocLimitNumber(NumberEntity):
     async def _fetch_limit(self) -> None:
         """Read the authoritative SOC limits over HTTP and adopt this slider's value."""
         try:
-            client = self._coordinator.config_entry.runtime_data.client
-            params = await client.get_solix_soc_params(self._sn)
+            params = await self.client.get_solix_soc_params(self._sn)
         except Exception:  # noqa: BLE001 - a read hiccup must not break the entity
             return
         v = params.get(self._limit.param_key)
@@ -240,28 +227,9 @@ class EufySolixSocLimitNumber(NumberEntity):
             self._value = float(v)
             self.async_write_ha_state()
 
-    @callback
-    def _refresh_from_snapshot(self) -> None:
-        """Adopt the limit from the coordinator's Solix snapshot, if changed."""
-        v = self._read_snapshot(self._coordinator.solix_devices.get(self._sn, {}))
-        if v is not None and v != self._value:
-            self._value = v
-            self.async_write_ha_state()
-
-    @callback
-    def _handle_event(self, event: Event) -> None:
-        """Update from a `solixReading` for this device carrying this limit's key."""
-        data = event.data
-        if data.get("event") != "solixReading" or data.get("deviceSn") != self._sn:
-            return
-        values = data.get("values") or {}
-        if self._limit.key in values:
-            self._value = float(values[self._limit.key])
-            self.async_write_ha_state()
-
     async def async_set_native_value(self, value: float) -> None:
         """Write the limit (whole-percent; optimistic — the bridge echo confirms)."""
-        await self._coordinator.config_entry.runtime_data.client.set_solix_soc_limits(
+        await self.client.set_solix_soc_limits(
             self._sn, **{self._limit.write_kw: int(value)}
         )
         self._value = float(int(value))

@@ -69,7 +69,7 @@ class EufySdkAlarmControlPanel(EufySdkDeviceEntity, AlarmControlPanelEntity):
 
     async def _set_mode(self, raw: int) -> None:
         """Send a raw mode; the bridge event is the canonical state update."""
-        client = self.coordinator.config_entry.runtime_data.client
+        client = self.client
         await client.set_property(self._sn, "armingMode", raw)
 
     async def async_alarm_arm_home(

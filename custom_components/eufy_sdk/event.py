@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from homeassistant.components.event import EventDeviceClass, EventEntity
 from homeassistant.core import callback
 
-from .const import DOMAIN
+from .const import EVENT_TYPE
 from .entity import EufySdkDeviceEntity
 from .pushmap import (
     DETECTION_CAPABILITIES,
@@ -22,8 +22,6 @@ if TYPE_CHECKING:
 
     from .coordinator import EufySdkDataUpdateCoordinator
     from .data import EufySdkConfigEntry
-
-EVENT_TYPE = f"{DOMAIN}_event"
 
 
 async def async_setup_entry(

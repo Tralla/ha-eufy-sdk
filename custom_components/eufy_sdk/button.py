@@ -81,7 +81,7 @@ class EufySdkRebootButton(EufySdkDeviceEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Reboot the HomeBase (it drops offline for a minute or two)."""
-        client = self.coordinator.config_entry.runtime_data.client
+        client = self.client
         await client.reboot(self._sn)
 
 
@@ -99,7 +99,7 @@ class EufyRefreshEventButton(EufySdkDeviceEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Ask the bridge to re-pull the newest event cover (nudges the Image)."""
-        client = self.coordinator.config_entry.runtime_data.client
+        client = self.client
         await client.refresh_event_image(self._sn)
 
 
@@ -135,7 +135,7 @@ class EufySdkPtzButton(EufySdkDeviceEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Send this button's PTZ action to the bridge."""
-        client = self.coordinator.config_entry.runtime_data.client
+        client = self.client
         await client.action(self._sn, self._action, *self._args)
 
 

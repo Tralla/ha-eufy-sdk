@@ -124,7 +124,7 @@ class EufySdkSiren(EufySdkDeviceEntity, SirenEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Sound the alarm — `trigger(duration)`, or `test` on a standalone siren."""
-        client = self.coordinator.config_entry.runtime_data.client
+        client = self.client
         if self._standalone:
             # `test` is the standalone family's only "make noise now" wire, and it
             # carries no duration: the device stops itself after its own configured
@@ -141,7 +141,7 @@ class EufySdkSiren(EufySdkDeviceEntity, SirenEntity):
 
     async def async_turn_off(self, **_: Any) -> None:
         """Silence a sounding alarm — `stop` is installed for every siren family."""
-        client = self.coordinator.config_entry.runtime_data.client
+        client = self.client
         await client.action(self._sn, "stop")
         self._hold(on=False)
 

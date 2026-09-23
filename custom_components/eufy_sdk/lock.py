@@ -74,7 +74,7 @@ class EufySdkLock(EufySdkDeviceEntity, LockEntity):
 
     async def _actuate(self, *, locked: bool) -> None:
         """Call the dedicated action, hold the value optimistically, reconcile later."""
-        client = self.coordinator.config_entry.runtime_data.client
+        client = self.client
         await client.action(self._sn, "lock" if locked else "unlock")
         self._assumed_locked = locked
         self.async_write_ha_state()
