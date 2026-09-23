@@ -11,13 +11,13 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import callback
-from homeassistant.helpers.device_registry import DeviceInfo
 
 from .bespoke import BITFIELD_SWITCHES
-from .const import CONF_HOST, DOMAIN, LOGGER
+from .const import CONF_HOST, EVENT_TYPE, LOGGER, SOLIX_READING_EVENT
 from .entity import (
     EufySdkDeviceEntity,
     EufySdkPropertyEntity,
+    EufySolixEntity,
     classify,
     has_capability,
     remove_stale_solix_entities,
@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from .coordinator import EufySdkDataUpdateCoordinator
     from .data import EufySdkConfigEntry
 
-EVENT_TYPE = f"{DOMAIN}_event"
 GO2RTC_RTSP_PORT = 8554  # go2rtc RTSP listener in the bridge image
 
 # Nominal usable capacity of the Anker Solix Solarbank 4 E5000 Pro (AE103) — the "E5000"
@@ -433,7 +432,7 @@ async def async_setup_entry(
 
     @callback
     def _on_solix_reading(event: Event) -> None:
-        if event.data.get("event") != "solixReading":
+        if event.data.get("event") != SOLIX_READING_EVENT:
             return
         sn = event.data.get("deviceSn")
         if sn:
@@ -630,17 +629,14 @@ class EufyLightEffectSensor(EufySdkDeviceEntity, SensorEntity):
         return self._name_by_id.get(rid) or f"Effect {rid}"
 
 
-class EufySolixSensor(SensorEntity):
+class EufySolixSensor(EufySolixEntity, SensorEntity):
     """
     A live telemetry sensor for an Anker Solix device.
 
-    Solix is a separate account/backend, so these are NOT coordinator (device-list)
-    entities: the initial value seeds from the bridge's `solix.devices` snapshot, and
-    updates arrive as `solixReading` events. Their HA device is distinct from any eufy
-    device (identifier `solix:<sn>`).
+    Seeds from the bridge's `solix.devices` snapshot and follows `solixReading` events
+    (see `EufySolixEntity`); its HA device is distinct from any eufy device.
     """
 
-    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
@@ -650,17 +646,12 @@ class EufySolixSensor(SensorEntity):
         metric: str,
         meta: dict[str, Any],
     ) -> None:
-        """Bind to one (device, metric); build its Anker Solix HA device_info."""
-        self._coordinator = coordinator
-        self._sn = sn
-        self._metric = metric
+        """Bind to one (device, metric), described by its SOLIX_*METRICS entry."""
         # The SDK emits this quantity under its ff09 channel key, not the metric name
         # (only meterVoltageL1 is emitted named). Fall back to the metric name so a tag
         # that later graduates to a confirmed SDK name still resolves.
         self._source = _METER_CHANNEL.get(metric, metric)
-        dev = coordinator.solix_devices.get(sn, {})
-        self._value = (dev.get("values") or {}).get(self._source)
-        self._attr_unique_id = f"solix_{sn}_{metric}"
+        super().__init__(coordinator, sn, metric, watch=(self._source,))
         self._attr_name = meta["name"]
         self._attr_native_unit_of_measurement = meta.get("unit")
         if meta.get("device_class"):
@@ -673,60 +664,14 @@ class EufySolixSensor(SensorEntity):
             self._attr_suggested_display_precision = meta["precision"]
         if meta.get("enabled_default") is False:
             self._attr_entity_registry_enabled_default = False
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"solix:{sn}")},
-            name=dev.get("name") or sn,
-            manufacturer="Anker Solix",
-            model=dev.get("productCode"),
-            sw_version=dev.get("firmware"),
-            serial_number=sn,
-        )
 
     @property
     def native_value(self) -> float | int | None:
         """The latest value for this metric (None until a reading arrives)."""
-        return self._value
-
-    @property
-    def available(self) -> bool:
-        """Available while the bridge still lists this Solix device."""
-        return self._sn in getattr(self._coordinator, "solix_devices", {})
-
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to live events AND the coordinator's device snapshot."""
-        await super().async_added_to_hass()
-        self.async_on_remove(self.hass.bus.async_listen(EVENT_TYPE, self._handle_event))
-        # Backstop: some metrics ride only an infrequent frame (batteryTemperature comes
-        # on the periodic "info" frame, not the fast realtime one). The bridge keeps the
-        # last value in its telemetry snapshot, which the coordinator polls — so also
-        # refresh from it; a metric whose live event is missed still shows.
-        self.async_on_remove(
-            self._coordinator.async_add_listener(self._refresh_from_snapshot)
-        )
-        self._refresh_from_snapshot()
-
-    @callback
-    def _refresh_from_snapshot(self) -> None:
-        """Adopt the latest value from the coordinator's Solix snapshot, if newer."""
-        dev = self._coordinator.solix_devices.get(self._sn, {})
-        v = (dev.get("values") or {}).get(self._source)
-        if v is not None and v != self._value:
-            self._value = v
-            self.async_write_ha_state()
-
-    @callback
-    def _handle_event(self, event: Event) -> None:
-        """Update from a `solixReading` for this device that carries our metric."""
-        data = event.data
-        if data.get("event") != "solixReading" or data.get("deviceSn") != self._sn:
-            return
-        values = data.get("values") or {}
-        if self._source in values:
-            self._value = values[self._source]
-            self.async_write_ha_state()
+        return self.solix_value(self._source)
 
 
-class EufySolixChannelSensor(SensorEntity):
+class EufySolixChannelSensor(EufySolixEntity, SensorEntity):
     """
     A raw Solix telemetry channel (diagnostic, disabled by default).
 
@@ -736,11 +681,11 @@ class EufySolixChannelSensor(SensorEntity):
     since what the channel measures isn't known until it's correlated.
     """
 
-    _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
     _attr_suggested_display_precision = 2
+    _track_snapshot = False
 
     def __init__(
         self,
@@ -748,55 +693,22 @@ class EufySolixChannelSensor(SensorEntity):
         sn: str,
         channel: str,
     ) -> None:
-        """Bind to one (device, channel_<tag>)."""
-        self._coordinator = coordinator
-        self._sn = sn
+        """Bind to one (device, channel_<tag> | state_<tag>)."""
+        super().__init__(coordinator, sn, channel, watch=(channel,))
         self._channel = channel
-        dev = coordinator.solix_devices.get(sn, {})
-        self._value = (dev.get("values") or {}).get(channel)
-        self._attr_unique_id = f"solix_{sn}_{channel}"
         # "channel_a8" -> "Channel A8"; "state_a5" -> "State A5"
         if channel.startswith("state_"):
             self._attr_name = f"State {channel.removeprefix('state_').upper()}"
         else:
             self._attr_name = f"Channel {channel.removeprefix('channel_').upper()}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"solix:{sn}")},
-            name=dev.get("name") or sn,
-            manufacturer="Anker Solix",
-            model=dev.get("productCode"),
-            sw_version=dev.get("firmware"),
-            serial_number=sn,
-        )
 
     @property
     def native_value(self) -> float | int | None:
         """The channel's latest raw value (None until a reading arrives)."""
-        return self._value
-
-    @property
-    def available(self) -> bool:
-        """Available while the bridge still lists this Solix device."""
-        return self._sn in getattr(self._coordinator, "solix_devices", {})
-
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to bridge events for live channel updates."""
-        await super().async_added_to_hass()
-        self.async_on_remove(self.hass.bus.async_listen(EVENT_TYPE, self._handle_event))
-
-    @callback
-    def _handle_event(self, event: Event) -> None:
-        """Update from a `solixReading` for this device that carries our channel."""
-        data = event.data
-        if data.get("event") != "solixReading" or data.get("deviceSn") != self._sn:
-            return
-        values = data.get("values") or {}
-        if self._channel in values:
-            self._value = values[self._channel]
-            self.async_write_ha_state()
+        return self.solix_value(self._channel)
 
 
-class EufySolixBatteryStatusSensor(SensorEntity):
+class EufySolixBatteryStatusSensor(EufySolixEntity, SensorEntity):
     """
     The Solarbank's charge state — Charging / Discharging / Idle.
 
@@ -805,32 +717,20 @@ class EufySolixBatteryStatusSensor(SensorEntity):
     or a plain battery) so the device tile shows at a glance what the pack is doing.
     """
 
-    _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options: ClassVar[list[str]] = ["Charging", "Discharging", "Idle"]
+    _attr_name = "Battery Status"
+    _track_snapshot = False
     _IDLE_W = 5  # |power| below this reads Idle, so standby noise doesn't flap it
 
     def __init__(self, coordinator: EufySdkDataUpdateCoordinator, sn: str) -> None:
-        """Bind to a Solix battery device; build its Anker Solix HA device_info."""
-        self._coordinator = coordinator
-        self._sn = sn
-        dev = coordinator.solix_devices.get(sn, {})
-        self._power = (dev.get("values") or {}).get("batteryPower")
-        self._attr_unique_id = f"solix_{sn}_battery_status"
-        self._attr_name = "Battery Status"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"solix:{sn}")},
-            name=dev.get("name") or sn,
-            manufacturer="Anker Solix",
-            model=dev.get("productCode"),
-            sw_version=dev.get("firmware"),
-            serial_number=sn,
-        )
+        """Bind to a Solix battery device."""
+        super().__init__(coordinator, sn, "battery_status", watch=("batteryPower",))
 
     @property
     def native_value(self) -> str | None:
         """Charging / Discharging / Idle from the sign of battery power."""
-        p = self._power
+        p = self.solix_value("batteryPower")
         if p is None:
             return None
         if p > self._IDLE_W:
@@ -848,29 +748,8 @@ class EufySolixBatteryStatusSensor(SensorEntity):
             "Idle": "mdi:battery",
         }.get(self.native_value, "mdi:battery")
 
-    @property
-    def available(self) -> bool:
-        """Available while the bridge still lists this Solix device."""
-        return self._sn in getattr(self._coordinator, "solix_devices", {})
 
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to bridge events for live status updates."""
-        await super().async_added_to_hass()
-        self.async_on_remove(self.hass.bus.async_listen(EVENT_TYPE, self._handle_event))
-
-    @callback
-    def _handle_event(self, event: Event) -> None:
-        """Update from a `solixReading` carrying batteryPower for this device."""
-        data = event.data
-        if data.get("event") != "solixReading" or data.get("deviceSn") != self._sn:
-            return
-        values = data.get("values") or {}
-        if "batteryPower" in values:
-            self._power = values["batteryPower"]
-            self.async_write_ha_state()
-
-
-class EufySolixModeSensor(SensorEntity):
+class EufySolixModeSensor(EufySolixEntity, SensorEntity):
     """
     The Solarbank's operating (EMS) mode, as a labelled enum-style string.
 
@@ -881,140 +760,46 @@ class EufySolixModeSensor(SensorEntity):
 
     # Not an ENUM device_class: an unmapped code renders as "Mode <n>", which an ENUM
     # (value must be in _attr_options) would reject — a string sensor shows it fine.
-    _attr_has_entity_name = True
     _attr_icon = "mdi:tune-variant"
+    _attr_name = "Operating Mode"
+    _track_snapshot = False
 
     def __init__(self, coordinator: EufySdkDataUpdateCoordinator, sn: str) -> None:
-        """Bind to a Solix battery device; seed the mode from its telemetry snapshot."""
-        self._coordinator = coordinator
-        self._sn = sn
-        dev = coordinator.solix_devices.get(sn, {})
-        self._mode = (dev.get("values") or {}).get("mode")
-        self._attr_unique_id = f"solix_{sn}_mode"
-        self._attr_name = "Operating Mode"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"solix:{sn}")},
-            name=dev.get("name") or sn,
-            manufacturer="Anker Solix",
-            model=dev.get("productCode"),
-            sw_version=dev.get("firmware"),
-            serial_number=sn,
-        )
+        """Bind to a Solix battery device."""
+        super().__init__(coordinator, sn, "mode", watch=("mode",))
 
     @property
     def native_value(self) -> str | None:
         """The mode label (or `Mode <n>` for an unmapped code; None until seen)."""
-        if self._mode is None:
+        mode = self.solix_value("mode")
+        if mode is None:
             return None
-        code = int(self._mode)
+        code = int(mode)
         return SOLIX_MODE_LABELS.get(code, f"Mode {code}")
 
-    @property
-    def available(self) -> bool:
-        """Available while the bridge still lists this Solix device."""
-        return self._sn in getattr(self._coordinator, "solix_devices", {})
 
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to bridge events for live mode updates."""
-        await super().async_added_to_hass()
-        self.async_on_remove(self.hass.bus.async_listen(EVENT_TYPE, self._handle_event))
-
-    @callback
-    def _handle_event(self, event: Event) -> None:
-        """Update from a `solixReading` carrying `mode` for this device."""
-        data = event.data
-        if data.get("event") != "solixReading" or data.get("deviceSn") != self._sn:
-            return
-        values = data.get("values") or {}
-        if "mode" in values:
-            self._mode = values["mode"]
-            self.async_write_ha_state()
-
-
-class _EufySolixTimeSensor(SensorEntity):
+class _EufySolixTimeSensor(EufySolixEntity, SensorEntity):
     """
     Base for the Solarbank time-to-full / time-to-empty countdown sensors.
 
     Both derive a countdown from the pack's state of charge and its charge/discharge
-    power against the nominal capacity, so they share the same plumbing: seed from the
-    `solix.devices` snapshot, then track `batterySoc`, `batteryPower`, `chargePower`
-    and `dischargePower` from `solixReading` events (and the coordinator's telemetry
-    snapshot). Each subclass turns those inputs into an `H:MM:SS` countdown string in
-    `native_value`; outside its own mode it reads None. It's a formatted string (not a
-    numeric DURATION) so the tile reads as a clock rather than a raw minute count.
+    power against the nominal capacity, so they watch the same four inputs. Each
+    subclass turns them into an `H:MM:SS` countdown string in `native_value`; outside
+    its own mode it reads None. It's a formatted string (not a numeric DURATION) so the
+    tile reads as a clock rather than a raw minute count.
     """
 
-    _attr_has_entity_name = True
     _attr_icon = "mdi:timer-sand"
     # Rate floor: below this the countdown blows up toward infinity (and standby noise
     # would make it jitter wildly), so we report Unknown instead.
     _MIN_POWER_W = 10
-    # (event/snapshot key -> instance attribute) for the telemetry we track.
-    _INPUTS: ClassVar[tuple[tuple[str, str], ...]] = (
-        ("batterySoc", "_soc"),
-        ("batteryPower", "_battery_power"),
-        ("chargePower", "_charge_power"),
-        ("dischargePower", "_discharge_power"),
-    )
+    _INPUTS = ("batterySoc", "batteryPower", "chargePower", "dischargePower")
 
-    def __init__(self, coordinator: EufySdkDataUpdateCoordinator, sn: str) -> None:
-        """Bind to a Solix battery device; seed inputs + Anker Solix HA device_info."""
-        self._coordinator = coordinator
-        self._sn = sn
-        dev = coordinator.solix_devices.get(sn, {})
-        values = dev.get("values") or {}
-        self._soc = values.get("batterySoc")
-        self._battery_power = values.get("batteryPower")
-        self._charge_power = values.get("chargePower")
-        self._discharge_power = values.get("dischargePower")
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"solix:{sn}")},
-            name=dev.get("name") or sn,
-            manufacturer="Anker Solix",
-            model=dev.get("productCode"),
-            sw_version=dev.get("firmware"),
-            serial_number=sn,
-        )
-
-    @property
-    def available(self) -> bool:
-        """Available while the bridge still lists this Solix device."""
-        return self._sn in getattr(self._coordinator, "solix_devices", {})
-
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to live events AND the coordinator's device snapshot."""
-        await super().async_added_to_hass()
-        self.async_on_remove(self.hass.bus.async_listen(EVENT_TYPE, self._handle_event))
-        self.async_on_remove(
-            self._coordinator.async_add_listener(self._refresh_from_snapshot)
-        )
-        self._refresh_from_snapshot()
-
-    @callback
-    def _refresh_from_snapshot(self) -> None:
-        """Adopt the latest inputs from the coordinator's Solix snapshot, if newer."""
-        dev = self._coordinator.solix_devices.get(self._sn, {})
-        values = dev.get("values") or {}
-        if self._adopt(values):
-            self.async_write_ha_state()
-
-    @callback
-    def _handle_event(self, event: Event) -> None:
-        """Update from a `solixReading` for this device carrying any tracked input."""
-        data = event.data
-        if data.get("event") != "solixReading" or data.get("deviceSn") != self._sn:
-            return
-        if self._adopt(data.get("values") or {}):
-            self.async_write_ha_state()
-
-    def _adopt(self, values: dict[str, Any]) -> bool:
-        """Copy any present tracked inputs from `values`; return True if any changed."""
-        changed = False
-        for key, attr in self._INPUTS:
-            if key in values and values[key] != getattr(self, attr):
-                setattr(self, attr, values[key])
-                changed = True
-        return changed
+    def __init__(
+        self, coordinator: EufySdkDataUpdateCoordinator, sn: str, unique_key: str
+    ) -> None:
+        """Bind to a Solix battery device."""
+        super().__init__(coordinator, sn, unique_key, watch=self._INPUTS)
 
     @staticmethod
     def _hms(hours: float) -> str:
@@ -1036,19 +821,18 @@ class EufySolixTimeToFullSensor(_EufySolixTimeSensor):
     """
 
     _attr_icon = "mdi:battery-charging"
+    _attr_name = "Battery Time to Full"
 
     def __init__(self, coordinator: EufySdkDataUpdateCoordinator, sn: str) -> None:
         """Bind to a Solix battery device."""
-        super().__init__(coordinator, sn)
-        self._attr_unique_id = f"solix_{sn}_time_to_full"
-        self._attr_name = "Battery Time to Full"
+        super().__init__(coordinator, sn, "time_to_full")
 
     def _charge_watts(self) -> float | None:
         """Charge rate: unsigned `chargePower`, else positive `batteryPower`."""
-        cp = self._charge_power
+        cp = self.solix_value("chargePower")
         if cp is not None and cp > 0:
             return cp
-        bp = self._battery_power
+        bp = self.solix_value("batteryPower")
         if bp is not None and bp > 0:
             return bp
         return None
@@ -1056,7 +840,7 @@ class EufySolixTimeToFullSensor(_EufySolixTimeSensor):
     @property
     def native_value(self) -> str | None:
         """H:MM:SS to full while charging; None otherwise."""
-        soc = self._soc
+        soc = self.solix_value("batterySoc")
         if soc is None or soc >= 100:  # noqa: PLR2004 - 100% = full, nothing to count
             return None
         watts = self._charge_watts()
@@ -1077,19 +861,18 @@ class EufySolixTimeToEmptySensor(_EufySolixTimeSensor):
     """
 
     _attr_icon = "mdi:battery-arrow-down"
+    _attr_name = "Battery Time to Empty"
 
     def __init__(self, coordinator: EufySdkDataUpdateCoordinator, sn: str) -> None:
         """Bind to a Solix battery device."""
-        super().__init__(coordinator, sn)
-        self._attr_unique_id = f"solix_{sn}_time_to_empty"
-        self._attr_name = "Battery Time to Empty"
+        super().__init__(coordinator, sn, "time_to_empty")
 
     def _discharge_watts(self) -> float | None:
         """Discharge rate: unsigned `dischargePower`, else |negative `batteryPower`|."""
-        dp = self._discharge_power
+        dp = self.solix_value("dischargePower")
         if dp is not None and dp > 0:
             return dp
-        bp = self._battery_power
+        bp = self.solix_value("batteryPower")
         if bp is not None and bp < 0:
             return -bp
         return None
@@ -1097,7 +880,7 @@ class EufySolixTimeToEmptySensor(_EufySolixTimeSensor):
     @property
     def native_value(self) -> str | None:
         """H:MM:SS to empty while discharging; None otherwise."""
-        soc = self._soc
+        soc = self.solix_value("batterySoc")
         if soc is None or soc <= 0:
             return None
         watts = self._discharge_watts()

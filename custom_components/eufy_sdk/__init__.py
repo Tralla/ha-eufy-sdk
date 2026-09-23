@@ -21,6 +21,7 @@ from .const import (
     CONF_PORT,
     DEFAULT_POLL_INTERVAL_MIN,
     DOMAIN,
+    EVENT_TYPE,
     LOGGER,
 )
 from .coordinator import EufySdkDataUpdateCoordinator
@@ -70,7 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EufySdkConfigEntry) -> b
         hass.async_create_task(coordinator.async_request_refresh())
 
     def _on_event(evt: dict) -> None:
-        hass.bus.async_fire(f"{DOMAIN}_event", evt)
+        hass.bus.async_fire(EVENT_TYPE, evt)
         event = evt.get("event")
         if event == "contactState":
             sn = evt.get("deviceSn") or evt.get("sn")

@@ -5,6 +5,13 @@ from logging import Logger, getLogger
 LOGGER: Logger = getLogger(__package__)
 
 DOMAIN = "eufy_sdk"
+
+# Every bridge event is re-fired on the HA bus under this type (automations, device
+# triggers and the entities that react to pushes all listen on it).
+EVENT_TYPE = f"{DOMAIN}_event"
+# The bridge event carrying an Anker Solix telemetry reading (`deviceSn` + `values`).
+SOLIX_READING_EVENT = "solixReading"
+
 ATTRIBUTION = "Data provided by the eufy cloud via ha-eufy-sdk-bridge"
 
 # Config-entry keys: the address of the ha-eufy-sdk-bridge WebSocket.
