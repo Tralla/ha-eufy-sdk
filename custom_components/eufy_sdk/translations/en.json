@@ -47,6 +47,9 @@
     "select": {
       "preset": {
         "name": "Preset"
+      },
+      "snapshot_policy": {
+        "name": "Snapshot policy"
       }
     },
     "sensor": {

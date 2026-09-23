@@ -47,6 +47,9 @@
     "select": {
       "preset": {
         "name": "Voorinstelling"
+      },
+      "snapshot_policy": {
+        "name": "Snapshotbeleid"
       }
     },
     "sensor": {
