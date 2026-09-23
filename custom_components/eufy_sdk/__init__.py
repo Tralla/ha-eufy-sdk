@@ -14,6 +14,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.loader import async_get_loaded_integration
 
 from .api import EufySdkApiClient
+from .arming_sync import apply_arming_mode_event
 from .const import (
     CONF_HOST,
     CONF_POLL_INTERVAL,
@@ -42,6 +43,7 @@ PLATFORMS: list[Platform] = [
     Platform.EVENT,
     Platform.LIGHT,
     Platform.LOCK,
+    Platform.ALARM_CONTROL_PANEL,
 ]
 
 
@@ -76,6 +78,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: EufySdkConfigEntry) -> b
                     evt.get("open")
                 )
                 coordinator.async_update_listeners()
+        elif event == "armingModeChanged":
+            serial = evt.get("deviceSn") or evt.get("sn")
+            if "mode" in evt:
+                apply_arming_mode_event(coordinator, evt)
+            elif serial and serial in coordinator.data:
+                entry.async_create_background_task(
+                    hass,
+                    coordinator.async_request_refresh(),
+                    "arming mode refresh",
+                )
         elif event == "ready":
             _refresh_now()
 
