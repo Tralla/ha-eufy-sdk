@@ -8,7 +8,8 @@ from custom_components.eufy_sdk.select import EufySdkSnapshotPolicySelect
 from custom_components.eufy_sdk.snapshot_policy import (
     SNAPSHOT_POLICY_AUTO,
     SNAPSHOT_POLICY_DEFAULT,
-    SNAPSHOT_POLICY_FRESH,
+    SNAPSHOT_POLICY_LIVE,
+    SNAPSHOT_POLICY_OPTIONS,
     SNAPSHOT_POLICY_STORED,
     bridge_mode_for_policy,
     normalize_snapshot_policy,
@@ -30,7 +31,7 @@ class SnapshotPolicyTests(unittest.IsolatedAsyncioTestCase):
     def test_explicit_modes_map_to_bridge_query_values(self) -> None:
         self.assertEqual(bridge_mode_for_policy(SNAPSHOT_POLICY_AUTO), "auto")
         self.assertEqual(bridge_mode_for_policy(SNAPSHOT_POLICY_STORED), "stored")
-        self.assertEqual(bridge_mode_for_policy(SNAPSHOT_POLICY_FRESH), "live")
+        self.assertEqual(bridge_mode_for_policy(SNAPSHOT_POLICY_LIVE), "live")
         self.assertEqual(
             snapshot_url("bridge", 3000, "CAM1", SNAPSHOT_POLICY_AUTO),
             "http://bridge:3000/snapshot/CAM1?mode=auto",
@@ -40,15 +41,27 @@ class SnapshotPolicyTests(unittest.IsolatedAsyncioTestCase):
             "http://bridge:3000/snapshot/CAM1?mode=stored",
         )
         self.assertEqual(
-            snapshot_url("bridge", 3000, "CAM1", SNAPSHOT_POLICY_FRESH),
+            snapshot_url("bridge", 3000, "CAM1", SNAPSHOT_POLICY_LIVE),
             "http://bridge:3000/snapshot/CAM1?mode=live",
         )
 
     def test_unknown_restored_value_defaults_safely(self) -> None:
         self.assertEqual(normalize_snapshot_policy("removed"), SNAPSHOT_POLICY_DEFAULT)
 
+    def test_historical_fresh_value_restores_as_live(self) -> None:
+        self.assertEqual(
+            SNAPSHOT_POLICY_OPTIONS,
+            (
+                SNAPSHOT_POLICY_DEFAULT,
+                SNAPSHOT_POLICY_AUTO,
+                SNAPSHOT_POLICY_STORED,
+                SNAPSHOT_POLICY_LIVE,
+            ),
+        )
+        self.assertEqual(normalize_snapshot_policy("Fresh"), SNAPSHOT_POLICY_LIVE)
+
     def test_policies_are_independent_by_camera_key(self) -> None:
-        policies = {"camera-a": SNAPSHOT_POLICY_FRESH}
+        policies = {"camera-a": SNAPSHOT_POLICY_LIVE}
         self.assertEqual(bridge_mode_for_policy(policies.get("camera-a")), "live")
         self.assertIsNone(bridge_mode_for_policy(policies.get("camera-b")))
 
@@ -63,11 +76,11 @@ class SnapshotPolicyTests(unittest.IsolatedAsyncioTestCase):
         )
         entity.async_write_ha_state = Mock()
 
-        await entity.async_select_option(SNAPSHOT_POLICY_FRESH)
+        await entity.async_select_option(SNAPSHOT_POLICY_LIVE)
 
         self.assertEqual(
             entity.coordinator.config_entry.runtime_data.snapshot_policy,
-            {"camera-a": SNAPSHOT_POLICY_FRESH},
+            {"camera-a": SNAPSHOT_POLICY_LIVE},
         )
         entity.async_write_ha_state.assert_called_once_with()
         entity.coordinator.config_entry.runtime_data.client.set.assert_not_called()

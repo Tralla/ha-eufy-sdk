@@ -5,24 +5,26 @@ from __future__ import annotations
 SNAPSHOT_POLICY_DEFAULT = "Default"
 SNAPSHOT_POLICY_AUTO = "Auto"
 SNAPSHOT_POLICY_STORED = "Stored"
-SNAPSHOT_POLICY_FRESH = "Fresh"
+SNAPSHOT_POLICY_LIVE = "Live"
 
 SNAPSHOT_POLICY_OPTIONS = (
     SNAPSHOT_POLICY_DEFAULT,
     SNAPSHOT_POLICY_AUTO,
     SNAPSHOT_POLICY_STORED,
-    SNAPSHOT_POLICY_FRESH,
+    SNAPSHOT_POLICY_LIVE,
 )
 
 _BRIDGE_MODE_BY_POLICY = {
     SNAPSHOT_POLICY_AUTO: "auto",
     SNAPSHOT_POLICY_STORED: "stored",
-    SNAPSHOT_POLICY_FRESH: "live",
+    SNAPSHOT_POLICY_LIVE: "live",
 }
 
 
 def normalize_snapshot_policy(value: str | None) -> str:
     """Return a supported local policy, defaulting unknown/restored values safely."""
+    if value == "Fresh":
+        return SNAPSHOT_POLICY_LIVE
     return value if value in SNAPSHOT_POLICY_OPTIONS else SNAPSHOT_POLICY_DEFAULT
 
 
