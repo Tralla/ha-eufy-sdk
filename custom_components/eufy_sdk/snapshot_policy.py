@@ -23,8 +23,6 @@ _BRIDGE_MODE_BY_POLICY = {
 
 def normalize_snapshot_policy(value: str | None) -> str:
     """Return a supported local policy, defaulting unknown/restored values safely."""
-    if value == "Fresh":
-        return SNAPSHOT_POLICY_LIVE
     return value if value in SNAPSHOT_POLICY_OPTIONS else SNAPSHOT_POLICY_DEFAULT
 
 

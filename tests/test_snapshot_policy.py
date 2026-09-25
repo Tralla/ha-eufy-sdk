@@ -55,7 +55,7 @@ class SnapshotPolicyTests(unittest.IsolatedAsyncioTestCase):
     def test_unknown_restored_value_defaults_safely(self) -> None:
         self.assertEqual(normalize_snapshot_policy("removed"), SNAPSHOT_POLICY_DEFAULT)
 
-    def test_historical_fresh_value_restores_as_live(self) -> None:
+    def test_fresh_is_an_unknown_value_and_defaults_safely(self) -> None:
         self.assertEqual(
             SNAPSHOT_POLICY_OPTIONS,
             (
@@ -65,7 +65,7 @@ class SnapshotPolicyTests(unittest.IsolatedAsyncioTestCase):
                 SNAPSHOT_POLICY_LIVE,
             ),
         )
-        self.assertEqual(normalize_snapshot_policy("Fresh"), SNAPSHOT_POLICY_LIVE)
+        self.assertEqual(normalize_snapshot_policy("Fresh"), SNAPSHOT_POLICY_DEFAULT)
 
     def test_policies_are_independent_by_camera_key(self) -> None:
         policies = {"camera-a": SNAPSHOT_POLICY_LIVE}
@@ -93,13 +93,18 @@ class SnapshotPolicyTests(unittest.IsolatedAsyncioTestCase):
             ("Auto", SNAPSHOT_POLICY_AUTO),
             ("Stored", SNAPSHOT_POLICY_STORED),
             ("Live", SNAPSHOT_POLICY_LIVE),
-            ("Fresh", SNAPSHOT_POLICY_LIVE),
+            ("Fresh", SNAPSHOT_POLICY_DEFAULT),
             ("unknown", SNAPSHOT_POLICY_DEFAULT),
         )
         for restored, expected in cases:
             with self.subTest(restored=restored):
                 coordinator = _coordinator({"camera-a": {"stream": "camera-a"}})
                 entity = EufySdkSnapshotPolicySelect(coordinator, "camera-a")
+                self.assertEqual(
+                    coordinator.config_entry.runtime_data.snapshot_policy,
+                    {},
+                    "constructing the selector must not publish before restore",
+                )
                 entity.async_on_remove = Mock()
                 entity.async_get_last_state = AsyncMock(
                     return_value=(SimpleNamespace(state=restored) if restored else None)
