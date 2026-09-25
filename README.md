@@ -42,6 +42,8 @@ Entities are built from what each device reports, so you only get what your hard
 
 - **Cameras & doorbells** — live WebRTC/HLS video (via go2rtc), snapshots, and a "Last event" image.
 - **Events** — motion / person / pet / package / doorbell-ring, as HA events + triggers.
+  Package delivered, package taken, and package stranded also have push-driven binary sensors
+  that automatically turn off.
 - **Lights** — eufy smart lights (on/off, brightness, and RGB colour where supported).
 - **Sensors** — battery %, signal, and per-device state.
 - **Switches, selects & numbers** — e.g. privacy/enabled, night vision, video/recording quality.

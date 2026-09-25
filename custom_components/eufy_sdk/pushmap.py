@@ -13,7 +13,7 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 
 # Push events surfaced as auto-off binary_sensors.
 # bus event name -> (key, friendly name, device_class, required capability)
-PUSH_BINARY_SENSORS: dict[str, tuple[str, str, BinarySensorDeviceClass, str]] = {
+PUSH_BINARY_SENSORS: dict[str, tuple[str, str, BinarySensorDeviceClass | None, str]] = {
     "motion": ("motion", "Motion", BinarySensorDeviceClass.MOTION, "motion"),
     "personDetected": (
         "person",
@@ -21,6 +21,9 @@ PUSH_BINARY_SENSORS: dict[str, tuple[str, str, BinarySensorDeviceClass, str]] = 
         BinarySensorDeviceClass.OCCUPANCY,
         "person_detection",
     ),
+    "packageDelivered": ("package_delivered", "Package delivered", None, "doorbell"),
+    "packageTaken": ("package_taken", "Package taken", None, "doorbell"),
+    "packageStranded": ("package_stranded", "Package stranded", None, "doorbell"),
 }
 
 # Push events surfaced on a per-device "Detection" event entity. This is a CATCH-ALL: it
