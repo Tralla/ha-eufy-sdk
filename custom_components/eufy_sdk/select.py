@@ -139,30 +139,27 @@ class EufySdkSnapshotPolicySelect(EufySdkDeviceEntity, SelectEntity, RestoreEnti
         """Bind a local policy to one camera's stable device identity."""
         super().__init__(coordinator, sn)
         self._attr_unique_id = f"{sn}_snapshot_policy"
-        self._policy = SNAPSHOT_POLICY_DEFAULT
-
-    @property
-    def current_option(self) -> str:
-        """Return the selected local policy label."""
-        return self._policy
+        self._attr_current_option = SNAPSHOT_POLICY_DEFAULT
 
     async def async_added_to_hass(self) -> None:
         """Restore the local choice without querying or writing the camera."""
         await super().async_added_to_hass()
         last = await self.async_get_last_state()
-        self._policy = normalize_snapshot_policy(last.state if last else None)
+        self._attr_current_option = normalize_snapshot_policy(
+            last.state if last else None
+        )
         self._publish()
 
     async def async_select_option(self, option: str) -> None:
         """Store the local choice and never send it through the device API."""
-        self._policy = normalize_snapshot_policy(option)
+        self._attr_current_option = normalize_snapshot_policy(option)
         self._publish()
         self.async_write_ha_state()
 
     def _publish(self) -> None:
         """Make the local choice available to this entry's camera entities."""
         self.coordinator.config_entry.runtime_data.snapshot_policy[self._sn] = (
-            self._policy
+            self._attr_current_option
         )
 
 

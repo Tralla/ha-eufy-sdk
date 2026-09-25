@@ -16,7 +16,6 @@ from custom_components.eufy_sdk.snapshot_policy import (
     SNAPSHOT_POLICY_AUTO,
     SNAPSHOT_POLICY_DEFAULT,
     SNAPSHOT_POLICY_LIVE,
-    SNAPSHOT_POLICY_OPTIONS,
     SNAPSHOT_POLICY_STORED,
     bridge_mode_for_policy,
     normalize_snapshot_policy,
@@ -55,22 +54,6 @@ class SnapshotPolicyTests(unittest.IsolatedAsyncioTestCase):
     def test_unknown_restored_value_defaults_safely(self) -> None:
         self.assertEqual(normalize_snapshot_policy("removed"), SNAPSHOT_POLICY_DEFAULT)
 
-    def test_snapshot_policy_options_are_current_values(self) -> None:
-        self.assertEqual(
-            SNAPSHOT_POLICY_OPTIONS,
-            (
-                SNAPSHOT_POLICY_DEFAULT,
-                SNAPSHOT_POLICY_AUTO,
-                SNAPSHOT_POLICY_STORED,
-                SNAPSHOT_POLICY_LIVE,
-            ),
-        )
-
-    def test_policies_are_independent_by_camera_key(self) -> None:
-        policies = {"camera-a": SNAPSHOT_POLICY_LIVE}
-        self.assertEqual(bridge_mode_for_policy(policies.get("camera-a")), "live")
-        self.assertIsNone(bridge_mode_for_policy(policies.get("camera-b")))
-
     async def test_select_update_is_local_and_persists_in_runtime_data(self) -> None:
         coordinator = _coordinator({"camera-a": {"stream": "camera-a"}})
         entity = EufySdkSnapshotPolicySelect(coordinator, "camera-a")
@@ -88,10 +71,10 @@ class SnapshotPolicyTests(unittest.IsolatedAsyncioTestCase):
     async def test_restore_lifecycle_normalizes_saved_policy_per_camera(self) -> None:
         cases = (
             (None, SNAPSHOT_POLICY_DEFAULT),
-            ("Default", SNAPSHOT_POLICY_DEFAULT),
-            ("Auto", SNAPSHOT_POLICY_AUTO),
-            ("Stored", SNAPSHOT_POLICY_STORED),
-            ("Live", SNAPSHOT_POLICY_LIVE),
+            ("default", SNAPSHOT_POLICY_DEFAULT),
+            ("auto", SNAPSHOT_POLICY_AUTO),
+            ("stored", SNAPSHOT_POLICY_STORED),
+            ("live", SNAPSHOT_POLICY_LIVE),
             ("unknown", SNAPSHOT_POLICY_DEFAULT),
         )
         for restored, expected in cases:

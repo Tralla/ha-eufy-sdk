@@ -52,7 +52,13 @@
         "name": "Preset"
       },
       "snapshot_policy": {
-        "name": "Snapshot policy"
+        "name": "Snapshot policy",
+        "state": {
+          "default": "Default",
+          "auto": "Automatic",
+          "stored": "Stored",
+          "live": "Live"
+        }
       }
     },
     "sensor": {

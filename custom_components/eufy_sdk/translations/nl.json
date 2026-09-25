@@ -52,7 +52,13 @@
         "name": "Voorinstelling"
       },
       "snapshot_policy": {
-        "name": "Snapshotbeleid"
+        "name": "Snapshotbeleid",
+        "state": {
+          "default": "Standaard",
+          "auto": "Automatisch",
+          "stored": "Opgeslagen",
+          "live": "Live"
+        }
       }
     },
     "sensor": {
