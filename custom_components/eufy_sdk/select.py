@@ -140,7 +140,6 @@ class EufySdkSnapshotPolicySelect(EufySdkDeviceEntity, SelectEntity, RestoreEnti
         super().__init__(coordinator, sn)
         self._attr_unique_id = f"{sn}_snapshot_policy"
         self._policy = SNAPSHOT_POLICY_DEFAULT
-        self._publish()
 
     @property
     def current_option(self) -> str:
