@@ -68,9 +68,9 @@ async def async_setup_entry(
         for spec in entry.runtime_data.properties.get(sn, [])
         if classify(spec) == "binary_sensor"
     ]
-    # Push-driven sensors (motion / person / ringing): flipped ON in real time by the
-    # SDK's push channel, then auto-OFF (push has no "cleared" signal). Gated on
-    # capability.
+    # Push events are flipped ON in real time, then auto-OFF (push has no "cleared"
+    # signal). Each sensor is gated on its event capability. Package events also update
+    # the separate latched Package state sensor below.
     for sn, dev in coordinator.data.items():
         caps = set(dev.get("capabilities", []))
         for bus_event, (key, name, device_class, cap) in PUSH_BINARY_SENSORS.items():
