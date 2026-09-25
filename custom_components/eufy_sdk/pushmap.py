@@ -23,6 +23,9 @@ PUSH_BINARY_SENSORS: dict[str, tuple[str, str, BinarySensorDeviceClass | None, s
     ),
     # HA has no doorbell binary_sensor class; a press also fires the Doorbell event.
     "doorbellPress": ("ringing", "Ringing", None, "doorbell"),
+    "packageDelivered": ("package_delivered", "Package delivered", None, "doorbell"),
+    "packageTaken": ("package_taken", "Package taken", None, "doorbell"),
+    "packageStranded": ("package_stranded", "Package stranded", None, "doorbell"),
 }
 
 # Push events surfaced on a per-device "Detection" event entity. This is a CATCH-ALL: it
@@ -91,5 +94,6 @@ THUMBNAIL_EVENTS: frozenset[str] = frozenset(
 # have no push thumbnail, so this is what actually advances "Last event" for them.
 EVENT_IMAGE_REFRESH = "eventImageUpdated"
 
-# Push carries no "cleared" signal, so a push binary_sensor auto-offs after this delay.
+# Push-event binary_sensors auto-off after this delay; the separate Package state sensor
+# is latched until a packageTaken event.
 PUSH_AUTO_OFF_SECONDS = 30

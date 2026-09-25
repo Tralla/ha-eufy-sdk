@@ -44,6 +44,8 @@ Entities are built from what each device reports, so you only get what your hard
 - **Events** — motion / person / pet / package / doorbell-ring, as HA events + triggers.
 - **Doorbell sensors** — a *Ringing* binary sensor (on at a press, clears after 30 s) and a
   *Package* binary sensor (on at delivery, stays on if stranded, off when taken; survives restarts).
+  Separate push-driven *Package delivered*, *Package taken*, and *Package stranded* binary sensors
+  pulse for 30 seconds; the *Package* sensor continues to represent a package waiting at the door.
 - **Lights** — eufy smart lights (on/off, brightness, and RGB colour where supported).
 - **Sensors** — battery %, signal, and per-device state.
 - **Switches, selects & numbers** — e.g. privacy/enabled, night vision, video/recording quality.
