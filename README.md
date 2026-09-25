@@ -53,6 +53,17 @@ Entities are built from what each device reports, so you only get what your hard
 bridge — it ships only in the bridge's `dev`/beta image. With that build, Solix devices appear as
 sensors. The eufyMake 3D printer isn't supported yet.
 
+## Camera Snapshot policy
+
+The Camera entities expose a per-camera **Snapshot policy** select that controls how
+still images are requested from the bridge:
+
+- **Default**: use the bridge's configured snapshot behaviour.
+- **Auto**: use the bridge's automatic battery-capability policy.
+- **Stored**: use retained or persisted imagery without starting live acquisition.
+- **Live**: try live acquisition first, with retained or persisted imagery available
+  as fallback.
+
 ## Migrating from `fuatakgun/eufy_security`
 
 Two things that cost real time when moving an existing setup across. Neither is a bug — they are
