@@ -1,6 +1,7 @@
 # ruff: noqa: ANN201, D100, D101, D102, INP001, PT009, SLF001
 
 import unittest
+from collections.abc import Callable
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
@@ -118,8 +119,18 @@ class PackagePushBinarySensorTests(unittest.IsolatedAsyncioTestCase):
         taken = next(
             entity for entity in entities if entity.unique_id == f"{SN}_package_taken"
         )
+        stranded = next(
+            entity
+            for entity in entities
+            if entity.unique_id == f"{SN}_package_stranded"
+        )
         self.assertNotEqual(package_state.unique_id, delivered.unique_id)
         self.assertNotEqual(package_state.unique_id, taken.unique_id)
+        self.assertNotEqual(package_state.unique_id, stranded.unique_id)
+        self.assertEqual(delivered.name, "Package delivered")
+        self.assertEqual(taken.name, "Package taken")
+        self.assertEqual(stranded.name, "Package stranded")
+        self.assertEqual(delivered.device_info, package_state.device_info)
 
         for sensor in (package_state, delivered, taken):
             sensor.async_write_ha_state = Mock()
@@ -133,14 +144,76 @@ class PackagePushBinarySensorTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(binary_sensor, "async_call_later", return_value=Mock()):
             delivered._handle_event(delivered_event)
             package_state._handle_event(delivered_event)
+            taken._handle_event(taken_event)
+            package_state._handle_event(taken_event)
             self.assertTrue(delivered.is_on)
+            self.assertTrue(taken.is_on)
+            self.assertFalse(package_state.is_on)
+
+    async def test_pulse_rearm_and_reset_do_not_change_persistent_package_state(self):
+        entry, _coordinator = entry_with({SN: {"capabilities": ["doorbell"]}})
+        entities = []
+        await binary_sensor.async_setup_entry(None, entry, entities.extend)
+        sensors = {sensor.unique_id: sensor for sensor in entities}
+        package_state = sensors[f"{SN}_package"]
+        delivered = sensors[f"{SN}_package_delivered"]
+        stranded = sensors[f"{SN}_package_stranded"]
+        taken = sensors[f"{SN}_package_taken"]
+        for sensor in (package_state, delivered, stranded, taken):
+            sensor.async_write_ha_state = Mock()
+        for sensor in (delivered, stranded, taken):
+            sensor.hass = Mock()
+
+        callbacks: list[Callable[[object], None]] = []
+        cancel_handles = [Mock() for _ in range(4)]
+
+        def schedule_auto_off(
+            _hass: object, delay: float, callback: Callable[[object], None]
+        ) -> Mock:
+            self.assertEqual(delay, PUSH_AUTO_OFF_SECONDS)
+            callbacks.append(callback)
+            return cancel_handles[len(callbacks) - 1]
+
+        delivered_event = SimpleNamespace(
+            data={"deviceSn": SN, "event": "packageDelivered"}
+        )
+        stranded_event = SimpleNamespace(
+            data={"deviceSn": SN, "event": "packageStranded"}
+        )
+        taken_event = SimpleNamespace(data={"deviceSn": SN, "event": "packageTaken"})
+        with patch.object(
+            binary_sensor, "async_call_later", side_effect=schedule_auto_off
+        ) as schedule:
+            delivered._handle_event(delivered_event)
+            package_state._handle_event(delivered_event)
+            delivered._handle_event(delivered_event)
+            package_state._handle_event(delivered_event)
+            stranded._handle_event(stranded_event)
+            package_state._handle_event(stranded_event)
             self.assertTrue(package_state.is_on)
+            self.assertTrue(delivered.is_on)
+            self.assertTrue(stranded.is_on)
+
+            callbacks[1](None)
+            self.assertFalse(delivered.is_on)
+            self.assertTrue(package_state.is_on)
+            self.assertTrue(stranded.is_on)
 
             taken._handle_event(taken_event)
             package_state._handle_event(taken_event)
+            self.assertFalse(package_state.is_on)
+            self.assertFalse(delivered.is_on)
+            self.assertTrue(stranded.is_on)
+            self.assertTrue(taken.is_on)
+            self.assertEqual(schedule.call_count, 4)
+            cancel_handles[0].assert_called_once()
 
-        self.assertTrue(taken.is_on)
-        self.assertFalse(package_state.is_on)
+            callbacks[2](None)
+            self.assertFalse(stranded.is_on)
+            self.assertFalse(package_state.is_on)
+            callbacks[3](None)
+            self.assertFalse(taken.is_on)
+            self.assertFalse(package_state.is_on)
 
     async def test_motion_and_person_push_sensors_keep_their_existing_behavior(self):
         entry, _coordinator = entry_with(

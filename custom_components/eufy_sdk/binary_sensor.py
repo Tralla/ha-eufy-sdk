@@ -70,8 +70,8 @@ async def async_setup_entry(
         if classify(spec) == "binary_sensor"
     ]
     # Push events are flipped ON in real time, then auto-OFF (push has no "cleared"
-    # signal). Each sensor is gated on its event capability. Package events also update
-    # the separate latched Package state sensor below.
+    # signal). Each sensor is gated on its event capability. The persistent Package
+    # entity below independently consumes the package events.
     for sn, dev in coordinator.data.items():
         caps = set(dev.get("capabilities", []))
         for bus_event, (key, name, device_class, cap) in PUSH_BINARY_SENSORS.items():
