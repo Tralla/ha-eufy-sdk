@@ -130,7 +130,8 @@ class PackagePushBinarySensorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delivered.name, "Package delivered")
         self.assertEqual(taken.name, "Package taken")
         self.assertEqual(stranded.name, "Package stranded")
-        self.assertEqual(delivered.device_info, package_state.device_info)
+        for sensor in (delivered, taken, stranded):
+            self.assertEqual(sensor.device_info, package_state.device_info)
 
         for sensor in (package_state, delivered, taken):
             sensor.async_write_ha_state = Mock()
@@ -149,6 +150,38 @@ class PackagePushBinarySensorTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(delivered.is_on)
             self.assertTrue(taken.is_on)
             self.assertFalse(package_state.is_on)
+
+    async def test_persistent_sensor_does_not_depend_on_compatibility_mappings(self):
+        entry, _coordinator = entry_with({SN: {"capabilities": ["doorbell"]}})
+        entities = []
+        package_events = {"packageDelivered", "packageTaken", "packageStranded"}
+        without_compatibility_mappings = {
+            event_name: spec
+            for event_name, spec in binary_sensor.PUSH_BINARY_SENSORS.items()
+            if event_name not in package_events
+        }
+
+        with patch.dict(
+            binary_sensor.PUSH_BINARY_SENSORS,
+            without_compatibility_mappings,
+            clear=True,
+        ):
+            await binary_sensor.async_setup_entry(None, entry, entities.extend)
+
+        package_state = next(
+            entity
+            for entity in entities
+            if isinstance(entity, binary_sensor.EufyPackageBinarySensor)
+        )
+        self.assertEqual(package_state.unique_id, f"{SN}_package")
+        self.assertFalse(
+            any(
+                entity.unique_id.endswith(
+                    ("_package_delivered", "_package_taken", "_package_stranded")
+                )
+                for entity in entities
+            )
+        )
 
     async def test_pulse_rearm_and_reset_do_not_change_persistent_package_state(self):
         entry, _coordinator = entry_with({SN: {"capabilities": ["doorbell"]}})
