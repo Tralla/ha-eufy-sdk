@@ -37,7 +37,8 @@ class PackagePushBinarySensorTests(unittest.IsolatedAsyncioTestCase):
         package_sensors = {
             next(iter(entity._events)): entity
             for entity in entities
-            if any(event in PACKAGE_EVENTS for event in entity._events)
+            if isinstance(entity, binary_sensor.EufyPushBinarySensor)
+            and any(event in PACKAGE_EVENTS for event in entity._events)
         }
         self.assertEqual(set(package_sensors), set(PACKAGE_EVENTS))
         motion_sensor = next(
@@ -110,7 +111,9 @@ class PackagePushBinarySensorTests(unittest.IsolatedAsyncioTestCase):
             if isinstance(entity, binary_sensor.EufyPackageBinarySensor)
         )
         delivered = next(
-            entity for entity in entities if entity.unique_id == f"{SN}_package_delivered"
+            entity
+            for entity in entities
+            if entity.unique_id == f"{SN}_package_delivered"
         )
         taken = next(
             entity for entity in entities if entity.unique_id == f"{SN}_package_taken"
@@ -123,7 +126,9 @@ class PackagePushBinarySensorTests(unittest.IsolatedAsyncioTestCase):
         delivered.hass = Mock()
         taken.hass = Mock()
 
-        delivered_event = SimpleNamespace(data={"deviceSn": SN, "event": "packageDelivered"})
+        delivered_event = SimpleNamespace(
+            data={"deviceSn": SN, "event": "packageDelivered"}
+        )
         taken_event = SimpleNamespace(data={"deviceSn": SN, "event": "packageTaken"})
         with patch.object(binary_sensor, "async_call_later", return_value=Mock()):
             delivered._handle_event(delivered_event)
