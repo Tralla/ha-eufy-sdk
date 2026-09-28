@@ -6,6 +6,9 @@
       },
       "connectivity": {
         "name": "Connectivity"
+      },
+      "package": {
+        "name": "Package"
       }
     },
     "button": {
