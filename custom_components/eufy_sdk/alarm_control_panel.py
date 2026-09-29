@@ -70,7 +70,8 @@ class EufySdkAlarmControlPanel(EufySdkDeviceEntity, AlarmControlPanelEntity):
         entry/exit delay — both come from the `alarm` push (see alarm_sync) and clear on
         the hub's own stop push or the auto-clear fallback.
         """
-        state = panel_state_for(self.device.get("state", {}))
+        alarms = self.coordinator.config_entry.runtime_data.station_alarms
+        state = panel_state_for(self.device.get("state", {}), alarms.get(self._sn))
         return AlarmControlPanelState(state) if state is not None else None
 
     async def _set_mode(self, raw: int) -> None:

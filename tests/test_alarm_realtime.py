@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock
 
 from custom_components.eufy_sdk import alarm_sync
+from custom_components.eufy_sdk.alarm_logic import AlarmState, panel_state_for
 
 
 def _coordinator() -> Mock:
@@ -15,30 +16,44 @@ def _coordinator() -> Mock:
     )
 
 
+def _trigger() -> dict:
+    return {"event": "alarm", "deviceSn": "homebase", "type": 4, "phase": "triggered"}
+
+
 class AlarmRealtimeTests(unittest.TestCase):
     def test_trigger_marks_station_sounding(self):
-        coordinator = _coordinator()
+        coordinator, alarms = _coordinator(), {}
 
-        phase = alarm_sync.apply_alarm_event(
-            coordinator,
-            {"event": "alarm", "deviceSn": "homebase", "type": 4, "phase": "triggered"},
-        )
+        phase = alarm_sync.apply_alarm_event(coordinator, alarms, _trigger())
 
         self.assertEqual(phase, "triggered")
-        state = coordinator.data["homebase"]["state"]
-        self.assertTrue(state["alarmTriggered"])
-        self.assertFalse(state["alarmPending"])
-        self.assertEqual(state["alarmType"], 4)
-        self.assertEqual(state["armingMode"], 1)
+        self.assertTrue(alarms["homebase"]["alarmTriggered"])
+        self.assertFalse(alarms["homebase"]["alarmPending"])
+        self.assertEqual(alarms["homebase"]["alarmType"], 4)
+        # The polled device state is left alone: the lifecycle lives in its own map.
+        self.assertEqual(coordinator.data["homebase"], {"state": {"armingMode": 1}})
         coordinator.async_update_listeners.assert_called_once_with()
-        self.assertEqual(coordinator.data["camera"], {"state": {"motion": False}})
+
+    def test_a_poll_replacing_the_device_state_keeps_the_alarm(self):
+        coordinator, alarms = _coordinator(), {}
+        alarm_sync.apply_alarm_event(coordinator, alarms, _trigger())
+
+        # A refresh rebuilds coordinator.data from the bridge with fresh dicts.
+        coordinator.data = {"homebase": {"state": {"armingMode": 0}}}
+
+        self.assertTrue(alarms["homebase"]["alarmTriggered"])
+        self.assertEqual(
+            panel_state_for(coordinator.data["homebase"]["state"], alarms["homebase"]),
+            AlarmState.TRIGGERED,
+        )
 
     def test_stop_from_app_clears_and_records_who(self):
-        coordinator = _coordinator()
-        coordinator.data["homebase"]["state"]["alarmTriggered"] = True
+        coordinator, alarms = _coordinator(), {}
+        alarm_sync.apply_alarm_event(coordinator, alarms, _trigger())
 
         phase = alarm_sync.apply_alarm_event(
             coordinator,
+            alarms,
             {
                 "event": "alarm",
                 "deviceSn": "homebase",
@@ -49,48 +64,80 @@ class AlarmRealtimeTests(unittest.TestCase):
         )
 
         self.assertEqual(phase, "stopped")
-        state = coordinator.data["homebase"]["state"]
-        self.assertFalse(state["alarmTriggered"])
-        self.assertFalse(state["alarmPending"])
-        self.assertEqual(state["alarmUser"], "danymexi")
+        self.assertFalse(alarms["homebase"]["alarmTriggered"])
+        self.assertFalse(alarms["homebase"]["alarmPending"])
+        self.assertEqual(alarms["homebase"]["alarmUser"], "danymexi")
 
     def test_delay_is_pending_until_the_trigger_lands(self):
-        coordinator = _coordinator()
+        coordinator, alarms = _coordinator(), {}
 
         self.assertEqual(
             alarm_sync.apply_alarm_event(
                 coordinator,
+                alarms,
                 {"event": "alarm", "deviceSn": "homebase", "phase": "delayed"},
             ),
             "delayed",
         )
-        state = coordinator.data["homebase"]["state"]
-        self.assertTrue(state["alarmPending"])
-        self.assertFalse(state["alarmTriggered"])
+        self.assertTrue(alarms["homebase"]["alarmPending"])
+        self.assertFalse(alarms["homebase"]["alarmTriggered"])
 
         alarm_sync.apply_alarm_event(
             coordinator,
+            alarms,
             {"event": "alarm", "deviceSn": "homebase", "type": 3, "phase": "triggered"},
         )
-        self.assertFalse(state["alarmPending"])
-        self.assertTrue(state["alarmTriggered"])
+        self.assertFalse(alarms["homebase"]["alarmPending"])
+        self.assertTrue(alarms["homebase"]["alarmTriggered"])
+
+    def test_clear_pending_ends_only_a_countdown(self):
+        coordinator, alarms = _coordinator(), {}
+        self.assertFalse(alarm_sync.clear_pending(coordinator, alarms, "homebase"))
+
+        alarm_sync.apply_alarm_event(
+            coordinator,
+            alarms,
+            {"event": "alarm", "deviceSn": "homebase", "phase": "delayed"},
+        )
+        self.assertTrue(alarm_sync.clear_pending(coordinator, alarms, "homebase"))
+        self.assertFalse(alarms["homebase"]["alarmPending"])
+
+        # A sounding alarm is not a countdown: a mode change must not silence it.
+        alarm_sync.apply_alarm_event(coordinator, alarms, _trigger())
+        self.assertFalse(alarm_sync.clear_pending(coordinator, alarms, "homebase"))
+        self.assertTrue(alarms["homebase"]["alarmTriggered"])
+
+    def test_disarm_or_home_during_a_countdown_ends_pending(self):
+        delayed = {"event": "alarm", "deviceSn": "homebase", "phase": "delayed"}
+        for mode, ends in ((63, True), (1, True), (0, False), (3, False)):
+            coordinator, alarms = _coordinator(), {}
+            alarm_sync.apply_alarm_event(coordinator, alarms, delayed)
+            coordinator.data["homebase"]["state"]["armingMode"] = mode
+
+            self.assertEqual(
+                alarm_sync.end_cancelled_delay(coordinator, alarms, "homebase"), ends
+            )
+            self.assertEqual(alarms["homebase"]["alarmPending"], not ends)
+        self.assertFalse(alarm_sync.end_cancelled_delay(_coordinator(), {}, "missing"))
 
     def test_unknown_device_and_other_events_are_ignored(self):
-        coordinator = _coordinator()
+        coordinator, alarms = _coordinator(), {}
 
         self.assertIsNone(
             alarm_sync.apply_alarm_event(
                 coordinator,
+                alarms,
                 {"event": "alarm", "deviceSn": "missing", "type": 4},
             )
         )
         self.assertIsNone(
             alarm_sync.apply_alarm_event(
                 coordinator,
+                alarms,
                 {"event": "armingModeChanged", "deviceSn": "homebase", "mode": 0},
             )
         )
-        self.assertNotIn("alarmTriggered", coordinator.data["homebase"]["state"])
+        self.assertEqual(alarms, {})
         coordinator.async_update_listeners.assert_not_called()
 
     def test_serial_falls_back_to_station_then_sn(self):
@@ -102,15 +149,16 @@ class AlarmRealtimeTests(unittest.TestCase):
         self.assertIsNone(alarm_sync.alarm_event_serial({}))
 
     def test_clear_alarm_only_notifies_when_something_was_set(self):
-        coordinator = _coordinator()
+        coordinator, alarms = _coordinator(), {}
 
-        self.assertFalse(alarm_sync.clear_alarm(coordinator, "homebase"))
-        self.assertFalse(alarm_sync.clear_alarm(coordinator, "missing"))
+        self.assertFalse(alarm_sync.clear_alarm(coordinator, alarms, "homebase"))
+        self.assertFalse(alarm_sync.clear_alarm(coordinator, alarms, "missing"))
         coordinator.async_update_listeners.assert_not_called()
 
-        coordinator.data["homebase"]["state"]["alarmTriggered"] = True
-        self.assertTrue(alarm_sync.clear_alarm(coordinator, "homebase"))
-        self.assertFalse(coordinator.data["homebase"]["state"]["alarmTriggered"])
+        alarm_sync.apply_alarm_event(coordinator, alarms, _trigger())
+        coordinator.async_update_listeners.reset_mock()
+        self.assertTrue(alarm_sync.clear_alarm(coordinator, alarms, "homebase"))
+        self.assertFalse(alarms["homebase"]["alarmTriggered"])
         coordinator.async_update_listeners.assert_called_once_with()
 
 

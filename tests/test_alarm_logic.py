@@ -60,22 +60,26 @@ class AlarmLogicTests(unittest.TestCase):
         self.assertIsNone(_MODULE.alarm_phase_for_event({"event": "motion"}))
 
     def test_panel_state_layers_the_alarm_over_the_mode(self):
+        mode = {"armingMode": 0}
         self.assertEqual(
-            _MODULE.panel_state_for({"armingMode": 0, "alarmTriggered": True}),
+            _MODULE.panel_state_for(mode, {"alarmTriggered": True}),
             _MODULE.AlarmState.TRIGGERED,
         )
         self.assertEqual(
-            _MODULE.panel_state_for({"armingMode": 0, "alarmPending": True}),
+            _MODULE.panel_state_for(mode, {"alarmPending": True}),
             _MODULE.AlarmState.PENDING,
         )
         self.assertEqual(
             _MODULE.panel_state_for(
-                {"armingMode": 0, "alarmTriggered": True, "alarmPending": True}
+                mode, {"alarmTriggered": True, "alarmPending": True}
             ),
             _MODULE.AlarmState.TRIGGERED,
         )
+        self.assertEqual(_MODULE.panel_state_for(mode), _MODULE.AlarmState.ARMED_AWAY)
+        # Flags in the polled state are not the lifecycle: only the alarm map counts.
         self.assertEqual(
-            _MODULE.panel_state_for({"armingMode": 0}), _MODULE.AlarmState.ARMED_AWAY
+            _MODULE.panel_state_for({"armingMode": 0, "alarmTriggered": True}),
+            _MODULE.AlarmState.ARMED_AWAY,
         )
         self.assertIsNone(_MODULE.panel_state_for({"armingMode": 2}))
         self.assertIsNone(_MODULE.panel_state_for({}))

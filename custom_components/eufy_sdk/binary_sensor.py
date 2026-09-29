@@ -245,24 +245,30 @@ class EufyStationAlarmBinarySensor(EufySdkDeviceEntity, BinarySensorEntity):
         coordinator: EufySdkDataUpdateCoordinator,
         sn: str,
     ) -> None:
-        """Bind to a station serial; the state map carries the lifecycle flags."""
+        """Bind to a station serial; `station_alarms` carries the lifecycle flags."""
         super().__init__(coordinator, sn)
         self._attr_unique_id = f"{sn}_alarm"
         self._attr_name = "Alarm"
 
     @property
+    def _alarm(self) -> dict[str, Any]:
+        """Return the station's push-fed alarm lifecycle (outside the polled state)."""
+        alarms = self.coordinator.config_entry.runtime_data.station_alarms
+        return alarms.get(self._sn, {})
+
+    @property
     def is_on(self) -> bool:
         """Sounding right now — a delay countdown is not yet an alarm."""
-        return bool(self.device.get("state", {}).get("alarmTriggered"))
+        return bool(self._alarm.get("alarmTriggered"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Say what started or stopped it: the type code and, on an app stop, who."""
-        state = self.device.get("state", {})
+        alarm = self._alarm
         return {
-            "pending": bool(state.get("alarmPending")),
-            "alarm_type": state.get("alarmType"),
-            "user_name": state.get("alarmUser"),
+            "pending": bool(alarm.get("alarmPending")),
+            "alarm_type": alarm.get("alarmType"),
+            "user_name": alarm.get("alarmUser"),
         }
 
 

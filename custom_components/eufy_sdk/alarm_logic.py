@@ -62,6 +62,8 @@ def alarm_state_for_raw(raw: Any) -> AlarmState | None:
 # stop is the CusPushAlarmType code in `type`. These codes END an alarm; every other
 # one names what STARTED it (PIR, camera, app, keypad panic, …). Verified live on a
 # T8010 (`type: 4` on trigger, `type: 16` on stop) and a T8030 — mega-yfue/eufy-sdk#223.
+# Telling start from stop is really the SDK's job, which #223 asks for: once the SDK
+# emits its own phase, this table should go and that phase be read instead.
 ALARM_STOP_TYPES: frozenset[int] = frozenset(
     {
         0,  # HUB_STOP
@@ -93,15 +95,19 @@ def alarm_phase_for_event(event: dict[str, Any]) -> str | None:
     return PHASE_DELAYED if event.get("phase") == PHASE_DELAYED else PHASE_TRIGGERED
 
 
-def panel_state_for(state: dict[str, Any]) -> AlarmState | None:
+def panel_state_for(
+    state: dict[str, Any], alarm: dict[str, Any] | None = None
+) -> AlarmState | None:
     """
-    Derive the alarm panel's state from a station's live state map.
+    Derive the alarm panel's state from a station's mode and alarm lifecycle.
 
-    A sounding alarm wins over the arming mode, then a running entry/exit delay,
-    then the plain mode mapping.
+    `state` is the polled device state (its `armingMode`); `alarm` is the station's
+    entry in the push-fed lifecycle map. A sounding alarm wins over the arming mode,
+    then a running entry/exit delay, then the plain mode mapping.
     """
-    if state.get("alarmTriggered"):
+    alarm = alarm or {}
+    if alarm.get("alarmTriggered"):
         return AlarmState.TRIGGERED
-    if state.get("alarmPending"):
+    if alarm.get("alarmPending"):
         return AlarmState.PENDING
     return alarm_state_for_raw(state.get("armingMode"))

@@ -16,7 +16,12 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.loader import async_get_loaded_integration
 
 from .alarm_logic import PHASE_STOPPED
-from .alarm_sync import alarm_event_serial, apply_alarm_event, clear_alarm
+from .alarm_sync import (
+    alarm_event_serial,
+    apply_alarm_event,
+    clear_alarm,
+    end_cancelled_delay,
+)
 from .api import EufySdkApiClient
 from .arming_sync import apply_arming_mode_event
 from .const import (
@@ -73,7 +78,7 @@ def _alarm_lifecycle(
     timers: dict[str, CALLBACK_TYPE] = {}
 
     def on_alarm(evt: dict) -> None:
-        phase = apply_alarm_event(coordinator, evt)
+        phase = apply_alarm_event(coordinator, entry.runtime_data.station_alarms, evt)
         serial = alarm_event_serial(evt)
         if phase is None or not serial:
             return
@@ -85,7 +90,7 @@ def _alarm_lifecycle(
         @callback
         def _auto_clear(_now: datetime, sn: str = serial) -> None:
             timers.pop(sn, None)
-            clear_alarm(coordinator, sn)
+            clear_alarm(coordinator, entry.runtime_data.station_alarms, sn)
 
         timers[serial] = async_call_later(hass, ALARM_AUTO_CLEAR_SECONDS, _auto_clear)
 
@@ -121,6 +126,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: EufySdkConfigEntry) -> b
 
     on_alarm = _alarm_lifecycle(hass, entry, coordinator)
 
+    # Disarming (or going Home) during an entry/exit countdown answers with a mode
+    # change, not an alarm stop — so a mode change to one of those ends `pending`.
+    def _end_cancelled_delay(serial: str | None) -> None:
+        if serial:
+            end_cancelled_delay(coordinator, entry.runtime_data.station_alarms, serial)
+
+    async def _refresh_then_end_cancelled_delay(serial: str) -> None:
+        await coordinator.async_request_refresh()
+        _end_cancelled_delay(serial)
+
     def _on_event(evt: dict) -> None:
         hass.bus.async_fire(EVENT_TYPE, evt)
         event = evt.get("event")
@@ -135,10 +150,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: EufySdkConfigEntry) -> b
             serial = evt.get("deviceSn") or evt.get("sn")
             if "mode" in evt:
                 apply_arming_mode_event(coordinator, evt)
+                _end_cancelled_delay(serial)
             elif serial and serial in coordinator.data:
                 entry.async_create_background_task(
                     hass,
-                    coordinator.async_request_refresh(),
+                    _refresh_then_end_cancelled_delay(serial),
                     "arming mode refresh",
                 )
         elif event == "alarm":

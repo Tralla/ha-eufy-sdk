@@ -20,6 +20,8 @@ class AlarmLifecycleTests(unittest.TestCase):
         self.entry = Mock()
         self.entry.async_on_unload = Mock()
         self.coordinator = Mock(data={"homebase": {"state": {"armingMode": 0}}})
+        self.alarms: dict = {}
+        self.entry.runtime_data.station_alarms = self.alarms
         self.scheduled: list[tuple[float, object]] = []
         self.cancels: list[Mock] = []
 
@@ -39,7 +41,7 @@ class AlarmLifecycleTests(unittest.TestCase):
         )
 
     def _state(self) -> dict:
-        return self.coordinator.data["homebase"]["state"]
+        return self.alarms["homebase"]
 
     def test_start_arms_the_fallback_and_a_stop_push_cancels_it(self):
         self.on_alarm(_trigger())
@@ -62,7 +64,7 @@ class AlarmLifecycleTests(unittest.TestCase):
 
         self.assertFalse(self._state()["alarmTriggered"])
         self.assertFalse(self._state()["alarmPending"])
-        self.assertEqual(self._state()["armingMode"], 0)
+        self.assertEqual(self.coordinator.data["homebase"]["state"]["armingMode"], 0)
 
     def test_a_new_start_rearms_instead_of_stacking_timers(self):
         self.on_alarm(_trigger())
