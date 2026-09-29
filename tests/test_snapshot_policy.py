@@ -6,6 +6,7 @@ from typing import Any, Self
 from unittest.mock import AsyncMock, Mock, patch
 
 from custom_components.eufy_sdk.camera import EufySdkCamera
+from custom_components.eufy_sdk.const import DEFAULT_GO2RTC_RTSP_PORT
 from custom_components.eufy_sdk.select import (
     EufySdkSnapshotPolicySelect,
 )
@@ -142,7 +143,13 @@ class SnapshotPolicyTests(unittest.IsolatedAsyncioTestCase):
                 coordinator.config_entry.runtime_data.snapshot_policy = (
                     {} if policy is None else {"camera-a": policy}
                 )
-                camera = _CameraWithHass(coordinator, "camera-a", "bridge", 3000)
+                camera = _CameraWithHass(
+                    coordinator,
+                    "camera-a",
+                    "bridge",
+                    3000,
+                    DEFAULT_GO2RTC_RTSP_PORT,
+                )
                 session = _SnapshotSession()
 
                 with patch(
@@ -170,8 +177,20 @@ class SnapshotPolicyTests(unittest.IsolatedAsyncioTestCase):
         await select_a.async_select_option(SNAPSHOT_POLICY_STORED)
         await select_b.async_select_option(SNAPSHOT_POLICY_LIVE)
         session = _SnapshotSession()
-        camera_a = _CameraWithHass(coordinator, "camera-a", "bridge", 3000)
-        camera_b = _CameraWithHass(coordinator, "camera-b", "bridge", 3000)
+        camera_a = _CameraWithHass(
+            coordinator,
+            "camera-a",
+            "bridge",
+            3000,
+            DEFAULT_GO2RTC_RTSP_PORT,
+        )
+        camera_b = _CameraWithHass(
+            coordinator,
+            "camera-b",
+            "bridge",
+            3000,
+            DEFAULT_GO2RTC_RTSP_PORT,
+        )
 
         with patch(
             "custom_components.eufy_sdk.camera.async_get_clientsession",
