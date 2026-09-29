@@ -18,6 +18,30 @@ def alarm_event_serial(event: dict[str, Any]) -> str | None:
     return event.get("deviceSn") or event.get("stationSn") or event.get("sn")
 
 
+def alarm_station_serial(coordinator: Any, event: dict[str, Any]) -> str | None:
+    """
+    Return the station whose alarm an `alarm` push reports.
+
+    When a camera attached to a HomeBase trips the alarm, the push names the CAMERA
+    in `deviceSn`/`s` (seen live: a T8113 on a T8030 in Away), and the hub only
+    appears inside `rec_content[].station_sn`. The lifecycle belongs to the station —
+    its panel and Alarm sensor — so resolve the camera to its station: first from the
+    device's own `stationSn` in the device list, else from the push's record.
+    """
+    serial = alarm_event_serial(event)
+    if not serial:
+        return None
+    station = (coordinator.data.get(serial) or {}).get("stationSn")
+    if not station or station == serial:
+        for record in event.get("rec_content") or []:
+            if isinstance(record, dict) and record.get("station_sn"):
+                station = record["station_sn"]
+                break
+    if station and station != serial and station in coordinator.data:
+        return station
+    return serial
+
+
 def apply_alarm_event(
     coordinator: Any, alarms: StationAlarms, event: dict[str, Any]
 ) -> str | None:
@@ -31,7 +55,7 @@ def apply_alarm_event(
     phase = alarm_phase_for_event(event)
     if phase is None:
         return None
-    serial = alarm_event_serial(event)
+    serial = alarm_station_serial(coordinator, event)
     if not serial or serial not in coordinator.data:
         return None
     alarms[serial] = {

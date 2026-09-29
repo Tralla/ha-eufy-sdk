@@ -17,7 +17,7 @@ from homeassistant.loader import async_get_loaded_integration
 
 from .alarm_logic import PHASE_STOPPED
 from .alarm_sync import (
-    alarm_event_serial,
+    alarm_station_serial,
     apply_alarm_event,
     clear_alarm,
     end_cancelled_delay,
@@ -79,7 +79,7 @@ def _alarm_lifecycle(
 
     def on_alarm(evt: dict) -> None:
         phase = apply_alarm_event(coordinator, entry.runtime_data.station_alarms, evt)
-        serial = alarm_event_serial(evt)
+        serial = alarm_station_serial(coordinator, evt)
         if phase is None or not serial:
             return
         if (cancel := timers.pop(serial, None)) is not None:

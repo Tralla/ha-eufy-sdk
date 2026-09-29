@@ -140,6 +140,41 @@ class AlarmRealtimeTests(unittest.TestCase):
         self.assertEqual(alarms, {})
         coordinator.async_update_listeners.assert_not_called()
 
+    def test_a_camera_tripped_alarm_lands_on_its_station(self):
+        # Shape of a live push from a T8113 attached to a T8030 in Away: the camera is
+        # the deviceSn, the hub only appears in rec_content[].station_sn.
+        push = {
+            "event": "alarm",
+            "deviceSn": "camera",
+            "s": "camera",
+            "type": 7,
+            "phase": "triggered",
+            "rec_content": [{"station_sn": "homebase", "device_sn": "other"}],
+        }
+        for camera_record in ({"stationSn": "homebase"}, {}):
+            coordinator = Mock(
+                data={
+                    "homebase": {"state": {"armingMode": 0}},
+                    "camera": {**camera_record, "state": {}},
+                }
+            )
+            alarms: dict = {}
+            self.assertEqual(
+                alarm_sync.apply_alarm_event(coordinator, alarms, push), "triggered"
+            )
+            self.assertEqual(set(alarms), {"homebase"})
+            self.assertTrue(alarms["homebase"]["alarmTriggered"])
+
+    def test_station_serial_keeps_a_station_and_unknown_stations(self):
+        coordinator = _coordinator()
+        self.assertEqual(
+            alarm_sync.alarm_station_serial(coordinator, {"deviceSn": "homebase"}),
+            "homebase",
+        )
+        # A station the device list doesn't know is not guessed at.
+        push = {"deviceSn": "camera", "rec_content": [{"station_sn": "missing"}]}
+        self.assertEqual(alarm_sync.alarm_station_serial(coordinator, push), "camera")
+
     def test_serial_falls_back_to_station_then_sn(self):
         self.assertEqual(
             alarm_sync.alarm_event_serial({"deviceSn": "a", "stationSn": "b"}), "a"
