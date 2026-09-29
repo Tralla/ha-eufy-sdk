@@ -42,6 +42,8 @@ Entities are built from what each device reports, so you only get what your hard
 
 - **Cameras & doorbells** — live WebRTC/HLS video (via go2rtc), snapshots, and a "Last event" image.
 - **Events** — motion / person / pet / package / doorbell-ring, as HA events + triggers.
+- **Doorbell sensors** — a *Ringing* binary sensor (on at a press, clears after 30 s) and a
+  *Package* binary sensor (on at delivery, stays on if stranded, off when taken; survives restarts).
 - **Lights** — eufy smart lights (on/off, brightness, and RGB colour where supported).
 - **Sensors** — battery %, signal, and per-device state.
 - **Switches, selects & numbers** — e.g. privacy/enabled, night vision, video/recording quality.
@@ -52,6 +54,30 @@ Entities are built from what each device reports, so you only get what your hard
 **Anker Solix** (power stations / smart meter) is a **separate account** and is **not** in the public
 bridge — it ships only in the bridge's `dev`/beta image. With that build, Solix devices appear as
 sensors. The eufyMake 3D printer isn't supported yet.
+
+## Migrating from `fuatakgun/eufy_security`
+
+Two things that cost real time when moving an existing setup across. Neither is a bug — they are
+just not guessable from either side.
+
+**Entity IDs are renamed.** The suffix changes are consistent, so a search-and-replace does most
+of the work once you know them:
+
+| Old (`eufy_security`) | New (`eufy_sdk`) |
+| --- | --- |
+| `binary_sensor.X_person_detected` | `binary_sensor.X_person` |
+| `binary_sensor.X_motion_detected` | `binary_sensor.X_motion` |
+| `image.X_event_image` | `image.X_last_event` |
+| `select.X_guard_mode` | `select.X_arming_mode` |
+
+On a 31-device setup that came to 263 substitutions across 10 files — automations, scripts,
+templates, packages and dashboards. Worth knowing: YAML-mode dashboards under `config/lovelace/`
+are not in `.storage`, so a sweep that only reads the entity registry will miss them.
+
+**The two integrations keep separate device registries.** The same physical camera gets its own
+device entry under each integration, so a migration script that maps old entities to new ones by
+`device_id` finds nothing at all. Match devices by **name** instead, then translate the entity
+suffixes above.
 
 ## Where it fits
 

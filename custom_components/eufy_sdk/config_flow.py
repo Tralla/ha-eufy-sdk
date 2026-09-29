@@ -20,9 +20,11 @@ from .const import (
     CONF_HOST,
     CONF_POLL_INTERVAL,
     CONF_PORT,
+    CONF_SOC_REFRESH,
     DEFAULT_GO2RTC_RTSP_PORT,
     DEFAULT_POLL_INTERVAL_MIN,
     DEFAULT_PORT,
+    DEFAULT_SOC_REFRESH_SEC,
     DOMAIN,
     LOGGER,
 )
@@ -377,17 +379,20 @@ class EufySdkFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class EufySdkOptionsFlow(config_entries.OptionsFlowWithReload):
-    """Options for runtime tuning."""
+    """Options: cloud poll interval (min) + Solarbank SOC-limit refresh (sec)."""
 
     async def async_step_init(
         self,
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
-        """Show and save the poll interval."""
+        """Show and save the poll interval and the SOC-limit refresh interval."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
         current_poll_interval = self.config_entry.options.get(
             CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_MIN
+        )
+        soc_current = self.config_entry.options.get(
+            CONF_SOC_REFRESH, DEFAULT_SOC_REFRESH_SEC
         )
         return self.async_show_form(
             step_id="init",
@@ -401,6 +406,17 @@ class EufySdkOptionsFlow(config_entries.OptionsFlowWithReload):
                             max=1440,
                             step=1,
                             unit_of_measurement="min",
+                            mode=selector.NumberSelectorMode.BOX,
+                        ),
+                    ),
+                    vol.Required(
+                        CONF_SOC_REFRESH, default=soc_current
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=15,
+                            max=3600,
+                            step=5,
+                            unit_of_measurement="s",
                             mode=selector.NumberSelectorMode.BOX,
                         ),
                     ),
