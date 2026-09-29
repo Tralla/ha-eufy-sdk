@@ -303,12 +303,21 @@ class EufySdkPropertyEntity(EufySdkDeviceEntity):
             return self._assumed_value
         return self.device.get("state", {}).get(self._prop)
 
+    @property
+    def write_only(self) -> bool:
+        """Whether the device accepts this setting but never reports it back."""
+        return bool(self._spec.get("writeOnly"))
+
     async def write(self, value: Any) -> None:
         """Write, hold the value optimistically, and reconcile via a delayed pull."""
         await self.client.set_property(self._sn, self._prop, value)
         # Keep the intended value shown until the delayed pull reconciles it.
         self._assumed_value = value
         self.async_write_ha_state()
+        # A write-only setting never comes back in a pull, so reconciling would only
+        # drop the value just written back to unknown: the written value is the state.
+        if self.write_only:
+            return
         # Schedule one delayed re-pull (replacing any pending) so a slow change
         # is reflected without waiting for the next scheduled poll.
         if self._post_write_unsub is not None:
