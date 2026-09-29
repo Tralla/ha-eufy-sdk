@@ -20,6 +20,7 @@ from .entity import (
     EufySdkDeviceEntity,
     EufySdkPropertyEntity,
     classify,
+    has_capability,
     solix_device_info,
 )
 from .pushmap import (
@@ -93,6 +94,15 @@ async def async_setup_entry(
         EufyStreamingBinarySensor(coordinator, sn)
         for sn, dev in coordinator.data.items()
         if dev.get("stream")
+    )
+    # An "Alarm" sensor per station: ON while the hub reports its alarm sounding. Fed
+    # by the `alarm` push lifecycle folded into the state map (alarm_sync), so it is
+    # the same fact the alarm panel shows as `triggered`, in a form automations can
+    # trigger on directly (the old integration's `<station>_alarm`).
+    entities.extend(
+        EufyStationAlarmBinarySensor(coordinator, sn)
+        for sn, dev in coordinator.data.items()
+        if has_capability(dev, "arming")
     )
     # A "Package" sensor per doorbell: latched by the package push events.
     entities.extend(
@@ -231,6 +241,43 @@ class EufyStreamingBinarySensor(EufySdkDeviceEntity, BinarySensorEntity):
         if self._active is not None:
             return self._active
         return bool(self.device.get("streaming"))
+
+
+class EufyStationAlarmBinarySensor(EufySdkDeviceEntity, BinarySensorEntity):
+    """ON while a HomeBase reports its alarm sounding (the `alarm` push lifecycle)."""
+
+    _attr_device_class = BinarySensorDeviceClass.SAFETY
+
+    def __init__(
+        self,
+        coordinator: EufySdkDataUpdateCoordinator,
+        sn: str,
+    ) -> None:
+        """Bind to a station serial; `station_alarms` carries the lifecycle flags."""
+        super().__init__(coordinator, sn)
+        self._attr_unique_id = f"{sn}_alarm"
+        self._attr_name = "Alarm"
+
+    @property
+    def _alarm(self) -> dict[str, Any]:
+        """Return the station's push-fed alarm lifecycle (outside the polled state)."""
+        alarms = self.coordinator.config_entry.runtime_data.station_alarms
+        return alarms.get(self._sn, {})
+
+    @property
+    def is_on(self) -> bool:
+        """Sounding right now — a delay countdown is not yet an alarm."""
+        return bool(self._alarm.get("alarmTriggered"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Say what started or stopped it: the type code and, on an app stop, who."""
+        alarm = self._alarm
+        return {
+            "pending": bool(alarm.get("alarmPending")),
+            "alarm_type": alarm.get("alarmType"),
+            "user_name": alarm.get("alarmUser"),
+        }
 
 
 class EufyPackageBinarySensor(EufySdkDeviceEntity, BinarySensorEntity, RestoreEntity):

@@ -33,3 +33,7 @@ class EufySdkData:
     # only present once the camera has been awake to answer. Empty means "not asked
     # yet", never "no presets" — see presets.py.
     preset_slots: dict[str, list[Any]] = field(default_factory=dict)
+    # Each station's alarm lifecycle from the `alarm` push ({sn: {alarmTriggered,
+    # alarmPending, alarmType, alarmUser}}). Kept here, outside the polled device
+    # state, so a coordinator refresh can't clear an alarm that is still sounding.
+    station_alarms: dict[str, dict[str, Any]] = field(default_factory=dict)
