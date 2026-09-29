@@ -13,7 +13,14 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import callback
 
 from .bespoke import BITFIELD_SWITCHES
-from .const import CONF_HOST, EVENT_TYPE, LOGGER, SOLIX_READING_EVENT
+from .const import (
+    CONF_GO2RTC_RTSP_PORT,
+    CONF_HOST,
+    DEFAULT_GO2RTC_RTSP_PORT,
+    EVENT_TYPE,
+    LOGGER,
+    SOLIX_READING_EVENT,
+)
 from .entity import (
     EufySdkDeviceEntity,
     EufySdkPropertyEntity,
@@ -31,8 +38,6 @@ if TYPE_CHECKING:
 
     from .coordinator import EufySdkDataUpdateCoordinator
     from .data import EufySdkConfigEntry
-
-GO2RTC_RTSP_PORT = 8554  # go2rtc RTSP listener in the bridge image
 
 # Nominal usable capacity of the Anker Solix Solarbank 4 E5000 Pro (AE103) — the "E5000"
 # in the name. Used to derive the time-to-full / time-to-empty countdown from SOC + W.
@@ -345,8 +350,9 @@ async def async_setup_entry(
     )
     # A "Stream URL" sensor per camera — the RTSP URL while a live feed is active.
     host = entry.data[CONF_HOST]
+    rtsp_port = int(entry.data.get(CONF_GO2RTC_RTSP_PORT, DEFAULT_GO2RTC_RTSP_PORT))
     entities.extend(
-        EufyStreamUrlSensor(coordinator, sn, host)
+        EufyStreamUrlSensor(coordinator, sn, host, rtsp_port)
         for sn, dev in coordinator.data.items()
         if dev.get("stream")
     )
@@ -564,10 +570,12 @@ class EufyStreamUrlSensor(EufySdkDeviceEntity, SensorEntity):
         coordinator: EufySdkDataUpdateCoordinator,
         sn: str,
         host: str,
+        port: int,
     ) -> None:
         """Bind to a camera serial and remember the bridge host for the URL."""
         super().__init__(coordinator, sn)
         self._host = host
+        self._port = port
         self._attr_unique_id = f"{sn}_stream_url"
         self._attr_translation_key = "stream_url"
         self._active: bool | None = None  # last streamState event; None → use poll
@@ -599,7 +607,7 @@ class EufyStreamUrlSensor(EufySdkDeviceEntity, SensorEntity):
         rtsp_on = self.device.get("state", {}).get("rtspStream") is True
         if not self._streaming and not rtsp_on:
             return None
-        return f"rtsp://{self._host}:{GO2RTC_RTSP_PORT}/{self._sn}"
+        return f"rtsp://{self._host}:{self._port}/{self._sn}"
 
 
 class EufyLightEffectSensor(EufySdkDeviceEntity, SensorEntity):
